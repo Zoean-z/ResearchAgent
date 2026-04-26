@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.tsbuildinfo
+
+# Node
+node_modules/
+
+# Local data
+data/artifacts/*
+!data/artifacts/.gitkeep
+data/sqlite/*
+!data/sqlite/.gitkeep
+data/openviking/*
+!data/openviking/ov.conf.example
+data/openviking_workspace/*
+backend/data/sqlite/*
+.project-loop/run/*
+
+# Local reference PDFs
+docs/*.pdf
+
+# Environment
+.env
+.env.*
+
+# Editors
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

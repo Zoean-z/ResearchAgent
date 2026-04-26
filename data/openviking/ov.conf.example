@@ -1,0 +1,26 @@
+{
+  "storage": {
+    "workspace": "d:/py/research-agent/data/openviking_workspace"
+  },
+  "log": {
+    "level": "INFO",
+    "output": "stdout"
+  },
+  "embedding": {
+    "dense": {
+      "api_base": "<api-endpoint>",
+      "api_key": "<your-api-key>",
+      "provider": "<provider-type>",
+      "dimension": 1024,
+      "model": "<model-name>"
+    },
+    "max_concurrent": 4
+  },
+  "vlm": {
+    "api_base": "<api-endpoint>",
+    "api_key": "<your-api-key>",
+    "provider": "<provider-type>",
+    "model": "<model-name>",
+    "max_concurrent": 8
+  }
+}
