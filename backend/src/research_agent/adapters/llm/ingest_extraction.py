@@ -173,8 +173,8 @@ class DeepSeekStructuredIngestExtractionTransport:
         system_prompt = (
             "你是 memory-routed paper agent 的 ingest 抽取器。"
             "只输出 JSON。"
-            "优先使用 broad candidate window；只有在证据明显不足时才请求更多上下文。"
-            "优先采用标题、摘要、引言、结论和局限性等正文证据，附录、表格、图注和参考文献密集片段只能作为次要证据。"
+            "这次输入已经尽量覆盖整篇论文，请先整体阅读所有候选，再决定是否真的还需要更多上下文。"
+            "优先采用标题、摘要、引言、结论和局限性等正文证据，附录、表格、图注和参考文献密集片段也要纳入整体判断，不要因为它们在附录就直接忽略。"
             "忽略表格行碎片、图注、页码和行号噪音，除非没有任何正文证据。"
             "把能支持的结论改写成简洁自然的中文，不要直接复制原始表格行或断行碎片。"
             "同时生成简短的 paper_summary，说明论文讲什么、解决什么问题、提出什么新想法、还剩什么局限，以及后续能问什么。"
@@ -193,6 +193,7 @@ class DeepSeekStructuredIngestExtractionTransport:
                 "candidate_passages": prompt.candidate_passages,
                 "instructions": (
                     "把论文抽成 paper、relation 和 open_question 三类 memory 草稿。"
+                    "本次输入已经尽量覆盖整篇论文，请不要只看前几段。"
                     "同时输出一段简短、可直接给用户看的 paper summary。"
                     "paper_summary 尽量基于标题、摘要和正文主线；只有在附录或表格明显更好时才用它们。"
                     "优先改写成中文短句，不要复述表格行、数字表格、页码或行号碎片。"

@@ -81,6 +81,7 @@ The backend now exposes browser-usable intake and runtime-status endpoints, and 
 - Tightened both query-agent prompt layers so direct `final_answer` is now the explicit default when retrieval is unnecessary, especially for greetings, acknowledgements, capability questions, and other low-context turns
 - Replaced the remaining mock query answer text with a Chinese answer composer, so follow-up answers now read as prose instead of debug strings
 - Cleaned up the ingest fallback text so memory summaries and paper summaries stay Chinese by default
+- Imported local PDFs now use a full-document ingest window for the model-backed extractor so the whole paper is visible to the paper/relation/open-question summary pass
 - Removed the left-side `Recent Runs` panel from the frontend so the sidebar stays focused on session navigation
 - Restored scrolling in the right-side memory drawer
 - Added same-origin frontend serving from the FastAPI app when `frontend/dist` is present
@@ -105,4 +106,4 @@ Keep using OpenViking as the conversation-history and memory backend while SQLit
 
 ## Current Work
 
-The repo now has a usable frontend shell, same-origin serving path, session deletion, live step-by-step observation for both query and ingest runs, inline chat-stream reasoning/evidence cards, and a first host-side guardrail set on top of the wider query tool pool. The left-side recent-run list is gone, the memory drawer scrolls, and query answers now render in Chinese prose instead of the old mock debug string. Next work should focus on token streaming vs richer upload/progress polish and multi-run evidence comparison, plus continued live-model ingest smoke and summary tuning in parallel.
+The repo now has a usable frontend shell, same-origin serving path, session deletion, live step-by-step observation for both query and ingest runs, inline chat-stream reasoning/evidence cards, and a first host-side guardrail set on top of the wider query tool pool. The left-side recent-run list is gone, the memory drawer scrolls, and query answers now render in Chinese prose instead of the old mock debug string. Imported local PDFs now take the aggressive full-document ingest path so the model-backed extractor can see all chunks at once, and the next check is whether that improves the paper summary before broadening it further. Next work should focus on token streaming vs richer upload/progress polish and multi-run evidence comparison, plus continued live-model ingest smoke and summary tuning in parallel.

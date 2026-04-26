@@ -2179,7 +2179,11 @@ def test_ingest_analysis_service_uses_chinese_fallbacks_for_imported_placeholder
     )
 
     class PlaceholderTransport:
+        def __init__(self) -> None:
+            self.prompts: list[StructuredIngestExtractionPrompt] = []
+
         def extract(self, prompt: StructuredIngestExtractionPrompt) -> StructuredIngestExtractionChoice:
+            self.prompts.append(prompt)
             return StructuredIngestExtractionChoice(
                 paper=StructuredIngestPaperDraft(
                     problem="Imported local PDF 583efe20-2783-42ba-bdaa-1a2016e46787-CRE_v2",
@@ -2212,16 +2216,25 @@ def test_ingest_analysis_service_uses_chinese_fallbacks_for_imported_placeholder
                 rationale="Placeholder imported title fallback test.",
             )
 
+    transport = PlaceholderTransport()
     service = IngestAnalysisService(
         session_repository=session_repository,
         paper_repository=paper_repository,
         chunk_repository=chunk_repository,
         memory_repository=memory_repository,
-        extraction_client=ModelBackedIngestExtractionClient(transport=PlaceholderTransport()),
+        extraction_client=ModelBackedIngestExtractionClient(transport=transport),
     )
 
     result = service.analyze(session.id, current_paper.id)
 
+    assert len(transport.prompts) == 1
+    assert len(transport.prompts[0].candidate_passages) == 4
+    assert {candidate["candidate_id"] for candidate in transport.prompts[0].candidate_passages} == {
+        "title",
+        "abstract",
+        "chunk-imported-placeholder-1",
+        "chunk-imported-placeholder-2",
+    }
     assert result.paper_memory.problem.startswith("本文")
     assert result.paper_memory.problem != current_paper.title
     assert result.paper_summary.what_it_is_about.startswith("本文")

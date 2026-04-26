@@ -44,6 +44,7 @@ Complete the first end-to-end live runtime observation path so both query and in
 - [x] Add a first host-side anti-stall guardrail that forces `compose_answer` after repeated low-yield query turns
 - [x] Add host-side duplicate-signature suppression so semantically repeated query calls collapse into `compose_answer`
 - [ ] Keep MCP as a later tool-surface option, not the primary persistence path
+- [x] Try an aggressive ingest-extraction trial for imported local PDFs by sending the full document to the model-backed extractor instead of the narrower recall window
 
 # Decisions
 
@@ -78,4 +79,4 @@ Complete the first end-to-end live runtime observation path so both query and in
 
 # Next Step
 
-The next query-runtime slice is to decide whether the final assistant text should become token-streamed before continuing broader frontend polish, now that the first host-side guardrails cover completed-tool no-repeat, repeated low-yield turns, and duplicate effective query signatures. Keep the Windows startup script and live-model ingest validation in the near-term queue.
+The next query-runtime slice is to decide whether the final assistant text should become token-streamed before continuing broader frontend polish, now that the first host-side guardrails cover completed-tool no-repeat, repeated low-yield turns, and duplicate effective query signatures. The ingest side is now experimenting with full-document candidate windows for imported local PDFs, so the next check is whether that actually improves the paper-summary and memory output before broadening it further. Keep the Windows startup script and live-model ingest validation in the near-term queue.

@@ -218,6 +218,21 @@ class IngestAnalysisService:
         if not chunks:
             return tuple(candidates)
 
+        if self._is_placeholder_source_title(paper.title):
+            for index, chunk in enumerate(chunks):
+                candidates.append(
+                    IngestExtractionCandidate(
+                        candidate_id=chunk.id,
+                        chunk_id=chunk.id,
+                        page=chunk.page,
+                        section=chunk.section,
+                        content_role=self._classify_chunk_role(chunk),
+                        excerpt=chunk.text,
+                        relevance_reason=f"full-document placeholder ingest window, chunk index {index}",
+                    )
+                )
+            return tuple(candidates)
+
         keyword_hit_ids = self._keyword_hit_ids(chunks)
         ranked_chunks = self._rank_candidate_chunks(chunks, keyword_hit_ids)
         if window_kind == "expanded":
