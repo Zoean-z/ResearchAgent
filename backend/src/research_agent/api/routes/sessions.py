@@ -14,6 +14,7 @@ from research_agent.api.schemas import (
     DeleteMemoryResponse,
     DeleteSessionResponse,
     MemorySnapshotResponse,
+    MemoryBundlesResponse,
     MessageIntakeRequest,
     MessageListResponse,
     MessageResponse,
@@ -149,6 +150,17 @@ def get_memory_snapshot(
     )
 
 
+@router.get("/{session_id}/memory-bundles", response_model=MemoryBundlesResponse)
+def get_memory_bundles(
+    session_id: str,
+    services: ServiceBundle = Depends(get_service_bundle),
+) -> MemoryBundlesResponse:
+    """Return paper-centric memory bundles for a session."""
+
+    bundle = _get_memory_bundles_or_404(session_id, services)
+    return MemoryBundlesResponse.from_domain(bundle)
+
+
 @router.delete("/{session_id}", response_model=DeleteSessionResponse)
 def delete_session(
     session_id: str,
@@ -203,6 +215,13 @@ def _get_session_or_404(session_id: str, services: ServiceBundle):
 def _get_memory_snapshot_or_404(session_id: str, services: ServiceBundle):
     try:
         return services.memory_snapshot.get_snapshot(session_id)
+    except EntityNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.") from error
+
+
+def _get_memory_bundles_or_404(session_id: str, services: ServiceBundle):
+    try:
+        return services.memory_bundles.get_bundle(session_id)
     except EntityNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.") from error
 

@@ -5,13 +5,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from research_agent.api.deps import create_repository_bundle, create_service_bundle, get_app_name
-from research_agent.api.routes import sessions_router, system_router, task_runs_router
+from research_agent.api.routes import memories_router, sessions_router, system_router, task_runs_router
 from research_agent.config import load_env_file
+from research_agent.utils import reset_request_api_key_override, set_request_api_key_override
 
 
 def create_app(
@@ -23,11 +24,20 @@ def create_app(
 
     load_env_file()
     app = FastAPI(title=get_app_name())
+    @app.middleware("http")
+    async def inject_request_api_key_override(request: Request, call_next):
+        token = set_request_api_key_override(request.headers.get("X-Research-Agent-Api-Key"))
+        try:
+            return await call_next(request)
+        finally:
+            reset_request_api_key_override(token)
+
     backend_name = storage_backend or os.getenv("RESEARCH_AGENT_STORAGE_BACKEND", "sqlite")
     app.state.repositories = create_repository_bundle(storage_backend=backend_name, sqlite_path=sqlite_path)
     app.state.services = create_service_bundle(app.state.repositories)
 
     app.include_router(system_router)
+    app.include_router(memories_router)
     app.include_router(sessions_router)
     app.include_router(task_runs_router)
     _mount_frontend(app)

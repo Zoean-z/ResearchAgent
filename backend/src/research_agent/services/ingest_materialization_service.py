@@ -7,11 +7,13 @@ from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 import re
+import ssl
 from urllib.error import URLError, HTTPError
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 from uuid import uuid4
 
+import certifi
 from pypdf import PdfReader
 
 from research_agent.domain.enums import ArtifactKind, SourceType
@@ -46,6 +48,9 @@ class _NullChunkRepository(ChunkRepositoryPort):
     def list_by_paper_ids(self, paper_ids: list[str]) -> list[Chunk]:
         return []
 
+    def list_by_artifact_id(self, artifact_id: str) -> list[Chunk]:
+        return []
+
 
 class IngestMaterializationService:
     """Create durable source bindings from arXiv or local PDF sources."""
@@ -75,15 +80,17 @@ class IngestMaterializationService:
         canonical_key = build_canonical_key(arxiv_id=arxiv_id)
         reader = self._load_pdf_reader_from_bytes(pdf_bytes, arxiv_url)
         page_count = len(reader.pages)
-        artifact = self._artifact_repository.save(
-            Artifact(
-                id=str(uuid4()),
-                kind=ArtifactKind.ARXIV_PDF,
-                uri_or_path=arxiv_url,
-                checksum=checksum,
-                page_count=page_count,
+        artifact = self._artifact_repository.get_by_checksum(checksum)
+        if artifact is None:
+            artifact = self._artifact_repository.save(
+                Artifact(
+                    id=str(uuid4()),
+                    kind=ArtifactKind.ARXIV_PDF,
+                    uri_or_path=arxiv_url,
+                    checksum=checksum,
+                    page_count=page_count,
+                )
             )
-        )
         title, authors = self._extract_pdf_metadata(reader, f"arXiv paper {arxiv_id}")
         paper, operation = self.register_paper(
             canonical_key=canonical_key,
@@ -92,22 +99,29 @@ class IngestMaterializationService:
             pdf_fingerprint=checksum,
             authors=authors,
         )
-        chunks = self._extract_pdf_chunks(reader, paper.id, artifact.id)
-        self._chunk_repository.save_many(chunks)
-        session_document = self._session_repository.save_document(
-            SessionDocument(
-                session_id=session_id,
-                paper_id=paper.id,
-                source_type=SourceType.ARXIV,
-                artifact_id=artifact.id,
+        session_document = self._session_repository.get_document(session_id, paper.id)
+        existing_chunks = list(self._chunk_repository.list_by_artifact_id(artifact.id))
+        if existing_chunks:
+            chunk_count = len(existing_chunks)
+        else:
+            chunks = self._extract_pdf_chunks(reader, paper.id, artifact.id)
+            self._chunk_repository.save_many(chunks)
+            chunk_count = len(chunks)
+        if session_document is None:
+            session_document = self._session_repository.save_document(
+                SessionDocument(
+                    session_id=session_id,
+                    paper_id=paper.id,
+                    source_type=SourceType.ARXIV,
+                    artifact_id=artifact.id,
+                )
             )
-        )
         return IngestMaterializationResult(
             paper=paper,
             artifact=artifact,
             session_document=session_document,
             operation=operation,
-            chunk_count=len(chunks),
+            chunk_count=chunk_count,
         )
 
     def materialize_pdf_source(self, session_id: str, file_path: str) -> IngestMaterializationResult:
@@ -122,15 +136,17 @@ class IngestMaterializationService:
         canonical_key = build_canonical_key(pdf_checksum=checksum)
         reader = self._load_pdf_reader(pdf_path, file_path)
         page_count = len(reader.pages)
-        artifact = self._artifact_repository.save(
-            Artifact(
-                id=str(uuid4()),
-                kind=ArtifactKind.LOCAL_PDF,
-                uri_or_path=file_path,
-                checksum=checksum,
-                page_count=page_count,
+        artifact = self._artifact_repository.get_by_checksum(checksum)
+        if artifact is None:
+            artifact = self._artifact_repository.save(
+                Artifact(
+                    id=str(uuid4()),
+                    kind=ArtifactKind.LOCAL_PDF,
+                    uri_or_path=file_path,
+                    checksum=checksum,
+                    page_count=page_count,
+                )
             )
-        )
         title, authors = self._extract_pdf_metadata(reader, f"local PDF {pdf_path.stem or 'source'}")
         paper, operation = self.register_paper(
             canonical_key=canonical_key,
@@ -138,22 +154,29 @@ class IngestMaterializationService:
             pdf_fingerprint=checksum,
             authors=authors,
         )
-        chunks = self._extract_pdf_chunks(reader, paper.id, artifact.id)
-        self._chunk_repository.save_many(chunks)
-        session_document = self._session_repository.save_document(
-            SessionDocument(
-                session_id=session_id,
-                paper_id=paper.id,
-                source_type=SourceType.PDF,
-                artifact_id=artifact.id,
+        session_document = self._session_repository.get_document(session_id, paper.id)
+        existing_chunks = list(self._chunk_repository.list_by_artifact_id(artifact.id))
+        if existing_chunks:
+            chunk_count = len(existing_chunks)
+        else:
+            chunks = self._extract_pdf_chunks(reader, paper.id, artifact.id)
+            self._chunk_repository.save_many(chunks)
+            chunk_count = len(chunks)
+        if session_document is None:
+            session_document = self._session_repository.save_document(
+                SessionDocument(
+                    session_id=session_id,
+                    paper_id=paper.id,
+                    source_type=SourceType.PDF,
+                    artifact_id=artifact.id,
+                )
             )
-        )
         return IngestMaterializationResult(
             paper=paper,
             artifact=artifact,
             session_document=session_document,
             operation=operation,
-            chunk_count=len(chunks),
+            chunk_count=chunk_count,
         )
 
     def register_paper(
@@ -240,11 +263,29 @@ class IngestMaterializationService:
         try:
             with urlopen(request, timeout=30) as response:
                 payload = response.read()
+        except URLError as exc:
+            if self._is_certificate_verify_failure(exc):
+                try:
+                    secure_context = ssl.create_default_context(cafile=certifi.where())
+                    with urlopen(request, timeout=30, context=secure_context) as response:
+                        payload = response.read()
+                except (HTTPError, URLError, TimeoutError, ValueError, OSError, ssl.SSLError) as retry_exc:
+                    raise InvalidIngestSourceError(SourceType.ARXIV.value, source_value, str(retry_exc)) from retry_exc
+            else:
+                raise InvalidIngestSourceError(SourceType.ARXIV.value, source_value, str(exc)) from exc
         except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
             raise InvalidIngestSourceError(SourceType.ARXIV.value, source_value, str(exc)) from exc
         if not payload:
             raise InvalidIngestSourceError(SourceType.ARXIV.value, source_value, "empty PDF response")
         return payload
+
+    def _is_certificate_verify_failure(self, exc: URLError) -> bool:
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            return True
+        if isinstance(reason, ssl.SSLError):
+            return "CERTIFICATE_VERIFY_FAILED" in str(reason).upper()
+        return "CERTIFICATE_VERIFY_FAILED" in str(exc).upper()
 
     def _require_session(self, session_id: str) -> None:
         if self._session_repository.get_by_id(session_id) is None:

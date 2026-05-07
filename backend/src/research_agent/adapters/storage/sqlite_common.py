@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 import json
 import sqlite3
 import threading
 from pathlib import Path
 from typing import Any
+
+from research_agent.utils import to_json_safe
 
 
 _DEFAULT_SCHEMA_SQL = """
@@ -63,7 +66,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
     page INTEGER,
-    section TEXT
+    section TEXT,
+    text_hash TEXT
 );
 
 CREATE TABLE IF NOT EXISTS paper_memories (
@@ -179,6 +183,7 @@ class SQLiteDatabase:
             self._connection.execute("PRAGMA foreign_keys = ON;")
             self._connection.executescript(SCHEMA_SQL)
             self._ensure_messages_role_column()
+            self._ensure_ingest_idempotency_schema()
 
     def _ensure_messages_role_column(self) -> None:
         rows = self._connection.execute("PRAGMA table_info(messages)").fetchall()
@@ -211,6 +216,112 @@ class SQLiteDatabase:
         )
         self._connection.commit()
 
+    def _ensure_ingest_idempotency_schema(self) -> None:
+        self._ensure_chunks_text_hash_column()
+        self._backfill_chunk_text_hashes()
+        self._dedupe_artifacts_by_checksum()
+        self._dedupe_session_documents_by_session_and_paper()
+        self._dedupe_chunks_by_business_key()
+        self._create_ingest_unique_indexes()
+        self._connection.commit()
+
+    def _ensure_chunks_text_hash_column(self) -> None:
+        rows = self._connection.execute("PRAGMA table_info(chunks)").fetchall()
+        column_names = {row[1] for row in rows}
+        if "text_hash" not in column_names:
+            self._connection.execute("ALTER TABLE chunks ADD COLUMN text_hash TEXT")
+
+    def _backfill_chunk_text_hashes(self) -> None:
+        rows = self._connection.execute("SELECT id, text FROM chunks WHERE text_hash IS NULL OR text_hash = ''").fetchall()
+        for row in rows:
+            text_hash = sha256((row["text"] or "").encode("utf-8")).hexdigest()
+            self._connection.execute("UPDATE chunks SET text_hash = ? WHERE id = ?", (text_hash, row["id"]))
+
+    def _dedupe_artifacts_by_checksum(self) -> None:
+        rows = self._connection.execute("SELECT checksum FROM artifacts GROUP BY checksum HAVING COUNT(*) > 1").fetchall()
+        for row in rows:
+            checksum = row["checksum"]
+            artifact_rows = self._connection.execute(
+                """
+                SELECT a.id, a.rowid AS artifact_rowid,
+                       (SELECT COUNT(*) FROM chunks WHERE artifact_id = a.id) AS chunk_count
+                FROM artifacts a
+                WHERE a.checksum = ?
+                ORDER BY chunk_count DESC, artifact_rowid ASC
+                """,
+                (checksum,),
+            ).fetchall()
+            if not artifact_rows:
+                continue
+            canonical_id = artifact_rows[0]["id"]
+            duplicates = [artifact_row["id"] for artifact_row in artifact_rows[1:]]
+            for duplicate_id in duplicates:
+                self._connection.execute(
+                    "UPDATE session_documents SET artifact_id = ? WHERE artifact_id = ?",
+                    (canonical_id, duplicate_id),
+                )
+                self._connection.execute("DELETE FROM chunks WHERE artifact_id = ?", (duplicate_id,))
+                self._connection.execute("DELETE FROM artifacts WHERE id = ?", (duplicate_id,))
+
+    def _dedupe_session_documents_by_session_and_paper(self) -> None:
+        rows = self._connection.execute(
+            "SELECT session_id, paper_id FROM session_documents GROUP BY session_id, paper_id HAVING COUNT(*) > 1"
+        ).fetchall()
+        for row in rows:
+            session_id = row["session_id"]
+            paper_id = row["paper_id"]
+            canonical = self._connection.execute(
+                """
+                SELECT rowid
+                FROM session_documents
+                WHERE session_id = ? AND paper_id = ?
+                ORDER BY added_at ASC, rowid ASC
+                LIMIT 1
+                """,
+                (session_id, paper_id),
+            ).fetchone()
+            if canonical is None:
+                continue
+            canonical_rowid = canonical["rowid"]
+            duplicates = self._connection.execute(
+                "SELECT id FROM session_documents WHERE session_id = ? AND paper_id = ? AND rowid != ? ORDER BY added_at ASC, rowid ASC",
+                (session_id, paper_id, canonical_rowid),
+            ).fetchall()
+            for duplicate in duplicates:
+                self._connection.execute("DELETE FROM session_documents WHERE id = ?", (duplicate["id"],))
+
+    def _dedupe_chunks_by_business_key(self) -> None:
+        rows = self._connection.execute(
+            """
+            SELECT artifact_id, page, text_hash, MIN(rowid) AS canonical_rowid
+            FROM chunks
+            GROUP BY artifact_id, page, text_hash
+            HAVING COUNT(*) > 1
+            """
+        ).fetchall()
+        for row in rows:
+            artifact_id = row["artifact_id"]
+            page = row["page"]
+            text_hash = row["text_hash"]
+            canonical_rowid = row["canonical_rowid"]
+            duplicates = self._connection.execute(
+                "SELECT id FROM chunks WHERE artifact_id = ? AND page IS ? AND text_hash = ? AND rowid != ? ORDER BY rowid ASC",
+                (artifact_id, page, text_hash, canonical_rowid),
+            ).fetchall()
+            for duplicate in duplicates:
+                self._connection.execute("DELETE FROM chunks WHERE id = ?", (duplicate["id"],))
+
+    def _create_ingest_unique_indexes(self) -> None:
+        self._connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_checksum_unique ON artifacts(checksum)"
+        )
+        self._connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_session_documents_session_paper_unique ON session_documents(session_id, paper_id)"
+        )
+        self._connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_business_unique ON chunks(artifact_id, page, text_hash)"
+        )
+
     def execute(self, sql: str, parameters: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         with self._lock:
             cursor = self._connection.execute(sql, parameters)
@@ -236,7 +347,7 @@ class SQLiteDatabase:
 
     @staticmethod
     def encode_json(value: Any) -> str:
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        return json.dumps(to_json_safe(value), ensure_ascii=False, separators=(",", ":"))
 
     @staticmethod
     def decode_json(value: str) -> Any:

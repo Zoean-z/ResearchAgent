@@ -22,9 +22,13 @@ class IngestExtractionCandidate:
     chunk_id: str | None
     page: int | None
     section: str | None
+    cleaned_text: str
     excerpt: str
     relevance_reason: str
+    source_chunk_ids: tuple[str, ...] = ()
     content_role: Literal["title", "abstract", "main", "appendix", "table", "reference", "unknown"] = "unknown"
+    quality_flags: tuple[str, ...] = ()
+    removed_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +48,37 @@ class IngestExtractionRequest:
     paper: Paper
     related_papers: tuple[Paper, ...]
     window: IngestExtractionWindow
+    extraction_stage: Literal["full_text", "batch", "merge"] = "full_text"
+    batch_index: int | None = None
+    batch_count: int | None = None
+    batch_label: str | None = None
+    batch_summaries: tuple[dict[str, object], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class IngestEvidenceFieldDraft:
+    """A single evidence-bound field returned by ingest extraction."""
+
+    text: str | None
+    evidence_chunk_ids: tuple[str, ...] = ()
+    confidence: float = 0.5
+    evidence_status: Literal["strong", "weak"] = "strong"
+
+
+@dataclass(frozen=True, slots=True)
+class IngestUnderstandingDraft:
+    """Model-facing paper understanding extracted from cleaned evidence."""
+
+    topic: IngestEvidenceFieldDraft | None
+    problem: IngestEvidenceFieldDraft | None
+    method: IngestEvidenceFieldDraft | None
+    novelty_claims: tuple[IngestEvidenceFieldDraft, ...]
+    key_results: tuple[IngestEvidenceFieldDraft, ...]
+    experiment_design: IngestEvidenceFieldDraft | None
+    limitations: tuple[IngestEvidenceFieldDraft, ...]
+    open_questions: tuple[IngestEvidenceFieldDraft, ...]
+    evidence_chunk_ids: tuple[str, ...]
+    confidence: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +132,7 @@ class IngestPaperSummaryDraft:
 class IngestExtractionDecision:
     """Structured ingest extraction result."""
 
+    understanding: IngestUnderstandingDraft | None
     paper: IngestPaperMemoryDraft
     relation: IngestRelationMemoryDraft | None
     open_question: IngestOpenQuestionMemoryDraft
@@ -119,8 +155,10 @@ __all__ = [
     "IngestExtractionDecision",
     "IngestExtractionRequest",
     "IngestExtractionWindow",
+    "IngestEvidenceFieldDraft",
     "IngestOpenQuestionMemoryDraft",
     "IngestPaperMemoryDraft",
     "IngestPaperSummaryDraft",
+    "IngestUnderstandingDraft",
     "IngestRelationMemoryDraft",
 ]

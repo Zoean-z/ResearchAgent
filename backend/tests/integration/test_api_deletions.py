@@ -76,6 +76,7 @@ def test_delete_session_endpoint_tombstones_and_clears_dialogue_state(tmp_path) 
         run_id = accept_response.json()["run_id"]
         delete_response = client.delete(f"/api/sessions/{session_id}")
         session_after_delete = client.get(f"/api/sessions/{session_id}")
+        sessions_after_delete = client.get("/api/sessions")
         messages_response = client.get(f"/api/sessions/{session_id}/messages")
         timeline_response = client.get(f"/api/sessions/{session_id}/timeline")
         snapshot_response = client.get(f"/api/sessions/{session_id}/memory-snapshot")
@@ -87,12 +88,12 @@ def test_delete_session_endpoint_tombstones_and_clears_dialogue_state(tmp_path) 
     assert payload["deleted_messages"] == 1
     assert payload["deleted_runs"] == 1
     assert payload["deleted_timeline_events"] == 0
-    assert payload["deleted_memories"] == 2
+    assert payload["deleted_memories"] == 0
     assert payload["session"]["status"] == "deleted"
     assert payload["mirrored_to_openviking"] is False
 
-    assert session_after_delete.status_code == 200
-    assert session_after_delete.json()["status"] == "deleted"
+    assert session_after_delete.status_code == 404
+    assert all(item["id"] != session_id for item in sessions_after_delete.json()["items"])
     assert messages_response.json() == {"items": []}
     assert timeline_response.json() == {"items": []}
     assert snapshot_response.json() == {
@@ -101,6 +102,8 @@ def test_delete_session_endpoint_tombstones_and_clears_dialogue_state(tmp_path) 
         "open_question_memories": [],
     }
     assert run_response.status_code == 404
+    assert {memory.id for memory in repositories.memories.list_paper_memories_for_papers(["paper-1"])} == {"paper-memory-1"}
+    assert {memory.id for memory in repositories.memories.list_relation_memories_for_papers(["paper-1"])} == {"relation-memory-1"}
 
 
 def test_delete_memory_endpoint_removes_only_the_selected_memory(tmp_path) -> None:

@@ -36,6 +36,9 @@ class ArtifactRepositoryPort(Protocol):
     def get_by_id(self, artifact_id: str) -> Artifact | None:
         """Fetch an artifact by id."""
 
+    def get_by_checksum(self, checksum: str) -> Artifact | None:
+        """Fetch an artifact by checksum."""
+
 
 @runtime_checkable
 class ChunkRepositoryPort(Protocol):
@@ -46,3 +49,6 @@ class ChunkRepositoryPort(Protocol):
 
     def list_by_paper_ids(self, paper_ids: Sequence[str]) -> Sequence[Chunk]:
         """List chunks linked to one or more paper ids."""
+
+    def list_by_artifact_id(self, artifact_id: str) -> Sequence[Chunk]:
+        """List chunks linked to a single artifact id."""

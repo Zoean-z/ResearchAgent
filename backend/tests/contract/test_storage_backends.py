@@ -505,3 +505,100 @@ def test_repository_bundle_defaults_to_sqlite(tmp_path) -> None:
 
     assert isinstance(bundle.sessions, SQLiteSessionRepository)
     assert isinstance(bundle.memories, SQLiteMemoryRepository)
+
+
+@pytest.mark.parametrize(
+    ("backend_name", "sqlite_path"),
+    [
+        ("memory", None),
+        ("sqlite", "sqlite-idempotent-storage.db"),
+    ],
+)
+def test_storage_backends_dedupe_artifacts_session_documents_and_chunks(
+    backend_name: str,
+    sqlite_path: str | None,
+    tmp_path,
+) -> None:
+    path = tmp_path / sqlite_path if sqlite_path is not None else None
+    bundle = create_repository_bundle(storage_backend=backend_name, sqlite_path=path)
+
+    session = bundle.sessions.save(
+        Session(
+            id="session-idempotent",
+            title="Idempotent Session",
+            created_at=_fixed_timestamp(),
+            updated_at=_fixed_timestamp(),
+            status="active",
+        )
+    )
+    paper = bundle.papers.save(
+        Paper(
+            id="paper-idempotent",
+            canonical_key=build_canonical_key(pdf_checksum="checksum-idempotent"),
+            title="Idempotent Paper",
+            pdf_fingerprint="checksum-idempotent",
+        )
+    )
+    first_artifact = bundle.artifacts.save(
+        Artifact(
+            id="artifact-idempotent-1",
+            kind=ArtifactKind.LOCAL_PDF,
+            uri_or_path="C:/tmp/a.pdf",
+            checksum="artifact-checksum-idempotent",
+            page_count=1,
+        )
+    )
+    second_artifact = bundle.artifacts.save(
+        Artifact(
+            id="artifact-idempotent-2",
+            kind=ArtifactKind.LOCAL_PDF,
+            uri_or_path="C:/tmp/b.pdf",
+            checksum="artifact-checksum-idempotent",
+            page_count=1,
+        )
+    )
+    bundle.sessions.save_document(
+        SessionDocument(
+            id="document-idempotent-1",
+            session_id=session.id,
+            paper_id=paper.id,
+            source_type=SourceType.PDF,
+            artifact_id=first_artifact.id,
+            added_at=_fixed_timestamp(),
+        )
+    )
+    second_document = bundle.sessions.save_document(
+        SessionDocument(
+            id="document-idempotent-2",
+            session_id=session.id,
+            paper_id=paper.id,
+            source_type=SourceType.PDF,
+            artifact_id=second_artifact.id,
+            added_at=_fixed_timestamp(),
+        )
+    )
+    first_chunk = Chunk(
+        id="chunk-idempotent-1",
+        paper_id=paper.id,
+        artifact_id=first_artifact.id,
+        text="Chunk text that should stay unique.",
+        page=1,
+        section="page-1",
+    )
+    second_chunk = Chunk(
+        id="chunk-idempotent-2",
+        paper_id=paper.id,
+        artifact_id=first_artifact.id,
+        text="Chunk text that should stay unique.",
+        page=1,
+        section="page-1",
+    )
+    bundle.chunks.save_many([first_chunk, second_chunk])
+
+    assert first_artifact.id == second_artifact.id
+    assert bundle.artifacts.get_by_checksum("artifact-checksum-idempotent").id == first_artifact.id
+    assert second_document.artifact_id == first_artifact.id
+    assert len(bundle.sessions.list_documents(session.id)) == 1
+    assert bundle.sessions.list_documents(session.id)[0].artifact_id == first_artifact.id
+    assert len(bundle.chunks.list_by_artifact_id(first_artifact.id)) == 1
+    assert len(bundle.chunks.list_by_paper_ids([paper.id])) == 1

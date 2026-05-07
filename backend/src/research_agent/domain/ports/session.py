@@ -30,6 +30,12 @@ class SessionRepositoryPort(Protocol):
     def list_documents(self, session_id: str) -> Sequence[SessionDocument]:
         """List documents linked to a session."""
 
+    def list_all_documents(self) -> Sequence[SessionDocument]:
+        """List all session-document bindings across sessions."""
+
+    def get_document(self, session_id: str, paper_id: str) -> SessionDocument | None:
+        """Fetch a session-document binding by session and paper."""
+
     def delete_documents(self, session_id: str) -> int:
         """Delete all session-document bindings for a session."""
 

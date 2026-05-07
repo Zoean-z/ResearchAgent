@@ -222,6 +222,7 @@ class IngestExecutionService:
                     ),
                     "paper_summary": asdict(memory_extraction.paper_summary),
                     "paper_id": materialization.paper.id,
+                    "extraction_debug": memory_extraction.extraction_debug,
                 },
             ),
         )

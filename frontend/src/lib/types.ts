@@ -83,6 +83,54 @@ export type MemorySnapshot = {
   open_question_memories: OpenQuestionMemory[];
 };
 
+export type MemoryBundleSourceChunk = {
+  chunk_id: string;
+  paper_id: string;
+  page: number | null;
+  section: string | null;
+  excerpt: string;
+};
+
+export type MemoryBundleItem = {
+  id: string;
+  memory_type: string;
+  content: string;
+  created_at: string | null;
+  updated_at: string;
+  paper_id: string | null;
+  source_paper: string | null;
+  target_paper: string | null;
+  relation_direction: "source" | "target" | null;
+  relation_type: string | null;
+  related_papers: string[];
+  source_chunk_ids: string[];
+  evidence_count: number;
+};
+
+export type MemoryBundlePaperInfo = {
+  paper_id: string;
+  title: string;
+  file_name: string | null;
+  created_at: string | null;
+  updated_at: string;
+  memory_count: number;
+};
+
+export type MemoryBundleGroup = {
+  paper: MemoryBundlePaperInfo;
+  paper_memories: MemoryBundleItem[];
+  open_question_memories: MemoryBundleItem[];
+  relation_memories: MemoryBundleItem[];
+  source_chunks: MemoryBundleSourceChunk[];
+  source_chunk_count: number;
+  empty_fields: string[];
+};
+
+export type MemoryBundles = {
+  papers: MemoryBundleGroup[];
+  unscoped_memories: MemoryBundleItem[];
+};
+
 export type RuntimeStatus = {
   app_name: string;
   storage_backend: string;

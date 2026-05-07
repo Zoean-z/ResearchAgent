@@ -10,6 +10,7 @@ from queue import Empty, Queue
 from threading import Lock
 
 from research_agent.domain.models import Message, TaskRun, TraceStep, utc_now
+from research_agent.utils import to_json_safe
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,9 +24,7 @@ class RuntimeStreamEvent:
     payload: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
-        data = asdict(self)
-        data["timestamp"] = self.timestamp.isoformat()
-        return data
+        return to_json_safe(asdict(self))
 
 
 class RuntimeEventSubscription:
@@ -172,7 +171,7 @@ class RuntimeEventBroker:
             )
         )
 
-    def publish_run_failed(self, task_run: TaskRun, reason: str) -> None:
+    def publish_run_failed(self, task_run: TaskRun, reason: str, error: dict[str, object] | None = None) -> None:
         self.publish(
             RuntimeStreamEvent(
                 event_type="run_failed",
@@ -187,6 +186,7 @@ class RuntimeEventBroker:
                         "finish_reason": task_run.finish_reason,
                     },
                     "reason": reason,
+                    "error": error,
                 },
             )
         )

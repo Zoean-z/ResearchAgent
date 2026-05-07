@@ -11,6 +11,10 @@ from research_agent.services.retrieval_service import MemoryRetrievalResult, Sou
 from research_agent.tools.protocol import (
     ChunkDescriptor,
     ComposeAnswerOutput,
+    GetConversationContextOutput,
+    GetPaperMemoryBundleOutput,
+    ListSessionPapersOutput,
+    ListRecentMessagesOutput,
     MemoryDescriptor,
     OpenVikingHitDescriptor,
     QueryToolName,
@@ -48,12 +52,12 @@ class QueryToolExecutor:
     def __init__(self, registry: InternalToolRegistry) -> None:
         self._registry = registry
 
-    def execute(self, request: ToolRequest) -> ToolResponse | ToolError:
+    def execute(self, request: ToolRequest, *, runtime_context: dict[str, Any] | None = None) -> ToolResponse | ToolError:
         """Execute a validated query tool request and return only the protocol outcome."""
 
-        return self.execute_with_raw(request).outcome
+        return self.execute_with_raw(request, runtime_context=runtime_context).outcome
 
-    def execute_with_raw(self, request: ToolRequest) -> ToolExecutionEnvelope:
+    def execute_with_raw(self, request: ToolRequest, *, runtime_context: dict[str, Any] | None = None) -> ToolExecutionEnvelope:
         """Execute a query tool request and keep the raw result for host-side logic."""
 
         validation_error = validate_tool_request(request)
@@ -93,6 +97,24 @@ class QueryToolExecutor:
                     top_k=params.top_k,
                 )
                 output = self._chunk_search_output(raw_result)
+            elif request.tool_name is QueryToolName.LIST_RECENT_MESSAGES:
+                session_id = self._runtime_session_id(runtime_context)
+                current_message_id = self._runtime_message_id(runtime_context)
+                output = self._registry.list_recent_messages(
+                    session_id=session_id,
+                    limit=params.limit,
+                    exclude_message_id=current_message_id,
+                )
+                raw_result = output
+            elif request.tool_name is QueryToolName.GET_CONVERSATION_CONTEXT:
+                session_id = self._runtime_session_id(runtime_context)
+                current_message_id = self._runtime_message_id(runtime_context)
+                output = self._registry.get_conversation_context(
+                    session_id=session_id,
+                    limit=params.limit,
+                    exclude_message_id=current_message_id,
+                )
+                raw_result = output
             elif request.tool_name is QueryToolName.RERANK_CANDIDATES:
                 raw_result, output = self._execute_rerank(params)
             elif request.tool_name is QueryToolName.READ_SOURCE_PASSAGES:
@@ -103,8 +125,18 @@ class QueryToolExecutor:
                     top_k=params.top_k,
                 )
                 output = self._read_source_output(raw_result, params.query)
+            elif request.tool_name is QueryToolName.LIST_SESSION_PAPERS:
+                session_id = self._runtime_session_id(runtime_context)
+                output = self._registry.list_session_papers(session_id=session_id, limit=params.limit)
+                raw_result = output
+            elif request.tool_name is QueryToolName.GET_PAPER_MEMORY_BUNDLE:
+                output = self._registry.get_paper_memory_bundle(
+                    paper_id=params.paper_id,
+                    source_chunk_limit=params.source_chunk_limit,
+                )
+                raw_result = output
             elif request.tool_name is QueryToolName.COMPOSE_ANSWER:
-                answer = self._registry.compose_answer(
+                evidence_package = self._registry.compose_answer(
                     query=params.query,
                     session_memory_count=params.session_memory_count,
                     global_memory_count=params.global_memory_count,
@@ -116,9 +148,8 @@ class QueryToolExecutor:
                     source_reread_chunks=params.source_context,
                     source_selection_source="model" if params.source_context else None,
                 )
-                raw_result = answer
                 output = ComposeAnswerOutput(
-                    answer=answer,
+                    evidence_package=evidence_package,
                     citations=tuple(params.memory_context),
                     source_citations=tuple(params.source_context),
                     memory_influence=self._memory_influence_text(
@@ -127,6 +158,7 @@ class QueryToolExecutor:
                         should_reread_source=params.should_reread_source,
                     ),
                 )
+                raw_result = output
             else:  # pragma: no cover - guarded by protocol enum
                 return ToolExecutionEnvelope(
                     outcome=ToolError(
@@ -160,6 +192,20 @@ class QueryToolExecutor:
             ),
             raw_result=raw_result,
         )
+
+    def _runtime_session_id(self, runtime_context: dict[str, Any] | None) -> str:
+        session_id = (runtime_context or {}).get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("runtime_context.session_id is required for this tool")
+        return session_id
+
+    def _runtime_message_id(self, runtime_context: dict[str, Any] | None) -> str | None:
+        message_id = (runtime_context or {}).get("message_id")
+        if message_id is None:
+            return None
+        if not isinstance(message_id, str) or not message_id:
+            raise ValueError("runtime_context.message_id must be a non-empty string when provided")
+        return message_id
 
     def _memory_output(
         self,

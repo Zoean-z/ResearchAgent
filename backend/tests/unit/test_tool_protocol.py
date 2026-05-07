@@ -13,12 +13,13 @@ from research_agent.adapters.openviking import (
 )
 from research_agent.adapters.storage import (
     InMemoryChunkRepository,
+    InMemoryArtifactRepository,
     InMemoryMemoryRepository,
     InMemoryPaperRepository,
     InMemorySessionRepository,
 )
-from research_agent.domain.enums import SourceType
-from research_agent.domain.models import Chunk, OpenQuestionMemory, Paper, PaperMemory, SessionDocument
+from research_agent.domain.enums import RelationType, SourceType
+from research_agent.domain.models import Chunk, OpenQuestionMemory, Paper, PaperMemory, RelationMemory, SessionDocument
 from research_agent.domain.policies import build_canonical_key
 from research_agent.domain.value_objects import ConfidenceScore
 from research_agent.services import ContextRerankService, MemoryExtractionService, RetrievalService, SessionService
@@ -35,6 +36,10 @@ from research_agent.tools.protocol import (
     ChunkDescriptor,
     ComposeAnswerInput,
     ComposeAnswerOutput,
+    GetPaperMemoryBundleInput,
+    GetPaperMemoryBundleOutput,
+    ListSessionPapersInput,
+    ListSessionPapersOutput,
     MemoryDescriptor,
     OpenVikingHitDescriptor,
     QueryToolName,
@@ -73,6 +78,8 @@ def test_query_tool_names_are_stable() -> None:
     assert QueryToolName.SEARCH_GLOBAL_MEMORY.value == "search_global_memory"
     assert QueryToolName.SEARCH_OPENVIKING_MEMORY.value == "search_openviking_memory"
     assert QueryToolName.SEARCH_SOURCE_CHUNKS.value == "search_source_chunks"
+    assert QueryToolName.LIST_SESSION_PAPERS.value == "list_session_papers"
+    assert QueryToolName.GET_PAPER_MEMORY_BUNDLE.value == "get_paper_memory_bundle"
     assert QueryToolName.RERANK_CANDIDATES.value == "rerank_candidates"
     assert QueryToolName.READ_SOURCE_PASSAGES.value == "read_source_passages"
     assert QueryToolName.COMPOSE_ANSWER.value == "compose_answer"
@@ -382,6 +389,25 @@ def test_search_source_chunks_output() -> None:
     assert out.coverage_score == 0.5
 
 
+def test_list_session_papers_schema_does_not_require_session_id() -> None:
+    params = ListSessionPapersInput()
+    assert params.limit == 20
+    assert ListSessionPapersOutput(papers=(), total_count=0).total_count == 0
+
+
+def test_get_paper_memory_bundle_schema_requires_business_paper_id_only() -> None:
+    params = GetPaperMemoryBundleInput(paper_id="paper-1")
+    assert params.paper_id == "paper-1"
+    assert params.source_chunk_limit == 5
+    output = GetPaperMemoryBundleOutput(
+        bundle={
+            "paper": {"paper_id": "paper-1", "title": "Paper"},
+            "empty_fields": ("paper_memory",),
+        }
+    )
+    assert output.bundle.empty_fields == ("paper_memory",)
+
+
 def test_rerank_candidates_output() -> None:
     out = RerankCandidatesOutput(
         selected_ids=("m3", "m1"),
@@ -401,12 +427,12 @@ def test_compose_answer_output() -> None:
         confidence=0.8,
     )
     out = ComposeAnswerOutput(
-        answer="The paper proposes a new method for X.",
+        evidence_package="evidence package for model answer",
         citations=(mem,),
         source_citations=(),
         memory_influence="Answer was grounded entirely in memory; no source reread was needed.",
     )
-    assert "new method" in out.answer
+    assert "evidence package" in out.evidence_package
     assert len(out.citations) == 1
     assert len(out.source_citations) == 0
 
@@ -488,8 +514,8 @@ def test_tool_definition_binds_all_seven_tools() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_query_tool_by_name_has_all_seven() -> None:
-    assert len(QUERY_TOOL_BY_NAME) == 7
+def test_query_tool_by_name_has_all_query_tools() -> None:
+    assert len(QUERY_TOOL_BY_NAME) == len(QueryToolName)
     for name in QueryToolName:
         assert name in QUERY_TOOL_BY_NAME
         assert QUERY_TOOL_BY_NAME[name].name == name
@@ -609,6 +635,8 @@ def test_all_tools_accept_valid_minimal_parameters() -> None:
         QueryToolName.SEARCH_GLOBAL_MEMORY: {"query": "q"},
         QueryToolName.SEARCH_OPENVIKING_MEMORY: {"scope": "session", "session_id": "s1", "query": "q"},
         QueryToolName.SEARCH_SOURCE_CHUNKS: {"session_id": "s1", "query": "q"},
+        QueryToolName.LIST_SESSION_PAPERS: {},
+        QueryToolName.GET_PAPER_MEMORY_BUNDLE: {"paper_id": "paper-1"},
         QueryToolName.RERANK_CANDIDATES: {
             "candidate_kind": "memory",
             "query": "q",
@@ -684,6 +712,90 @@ def test_query_tool_executor_search_session_memory_returns_tool_response() -> No
     assert isinstance(outcome, ToolResponse)
     assert outcome.tool_name is QueryToolName.SEARCH_SESSION_MEMORY
     assert outcome.result["memories"][0]["memory_id"] == "paper-memory-1"
+
+
+def test_query_tool_executor_list_session_papers_uses_runtime_context() -> None:
+    session_repository = InMemorySessionRepository()
+    memory_repository = InMemoryMemoryRepository()
+    chunk_repository = InMemoryChunkRepository()
+    paper_repository = InMemoryPaperRepository()
+    artifact_repository = InMemoryArtifactRepository()
+    session = session_repository.save(SessionService(session_repository=session_repository).create_session("Papers"))
+    paper = paper_repository.save(Paper(id="paper-1", canonical_key=build_canonical_key(arxiv_id="2401.12345"), title="Session Paper"))
+    session_repository.save_document(SessionDocument(session_id=session.id, paper_id=paper.id, source_type=SourceType.PDF, artifact_id="artifact-1"))
+    memory_repository.upsert_paper_memory(PaperMemory(id="paper-memory-1", paper_id=paper.id, confidence=ConfidenceScore(value=0.8)))
+    registry = InternalToolRegistry(
+        paper_repository=paper_repository,
+        retrieval_service=RetrievalService(session_repository=session_repository, memory_repository=memory_repository, chunk_repository=chunk_repository),
+        context_rerank_service=ContextRerankService(),
+        memory_extraction_service=MemoryExtractionService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            chunk_repository=chunk_repository,
+            memory_repository=memory_repository,
+        ),
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+        artifact_repository=artifact_repository,
+    )
+    executor = QueryToolExecutor(registry)
+
+    outcome = executor.execute(
+        ToolRequest(tool_name=QueryToolName.LIST_SESSION_PAPERS, parameters={"limit": 5}),
+        runtime_context={"session_id": session.id},
+    )
+
+    assert isinstance(outcome, ToolResponse)
+    assert outcome.result["papers"][0]["paper_id"] == "paper-1"
+    assert outcome.result["papers"][0]["memory_count"] == 1
+
+
+def test_query_tool_executor_get_paper_memory_bundle_returns_memory_and_evidence() -> None:
+    session_repository = InMemorySessionRepository()
+    memory_repository = InMemoryMemoryRepository()
+    chunk_repository = InMemoryChunkRepository()
+    paper_repository = InMemoryPaperRepository()
+    session = session_repository.save(SessionService(session_repository=session_repository).create_session("Bundle"))
+    paper = paper_repository.save(Paper(id="paper-1", canonical_key=build_canonical_key(arxiv_id="2401.12345"), title="Bundle Paper"))
+    session_repository.save_document(SessionDocument(session_id=session.id, paper_id=paper.id, source_type=SourceType.PDF, artifact_id="artifact-1"))
+    memory_repository.upsert_paper_memory(PaperMemory(id="paper-memory-1", paper_id=paper.id, problem="Problem", confidence=ConfidenceScore(value=0.8)))
+    memory_repository.upsert_open_question_memory(OpenQuestionMemory(id="open-1", unresolved_question="What remains?", related_papers=[paper.id]))
+    memory_repository.upsert_relation_memory(
+        RelationMemory(
+            id="relation-1",
+            source_paper=paper.id,
+            target_paper="paper-2",
+            relation_type=RelationType.COMPLEMENTS,
+            summary="Complements prior work.",
+        )
+    )
+    chunk_repository.save_many((Chunk(id="chunk-1", paper_id=paper.id, artifact_id="artifact-1", text="Evidence chunk text."),))
+    registry = InternalToolRegistry(
+        paper_repository=paper_repository,
+        retrieval_service=RetrievalService(session_repository=session_repository, memory_repository=memory_repository, chunk_repository=chunk_repository),
+        context_rerank_service=ContextRerankService(),
+        memory_extraction_service=MemoryExtractionService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            chunk_repository=chunk_repository,
+            memory_repository=memory_repository,
+        ),
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+    )
+    executor = QueryToolExecutor(registry)
+
+    outcome = executor.execute(ToolRequest(tool_name=QueryToolName.GET_PAPER_MEMORY_BUNDLE, parameters={"paper_id": paper.id}))
+
+    assert isinstance(outcome, ToolResponse)
+    bundle = outcome.result["bundle"]
+    assert bundle["paper"]["paper_id"] == paper.id
+    assert bundle["paper_memory"]["id"] == "paper-memory-1"
+    assert bundle["open_questions"][0]["id"] == "open-1"
+    assert bundle["relations"][0]["id"] == "relation-1"
+    assert bundle["evidence_source_chunks"][0]["chunk_id"] == "chunk-1"
 
 
 def test_query_tool_executor_search_openviking_memory_returns_tool_response() -> None:
@@ -878,7 +990,8 @@ def test_heuristic_query_tool_planner_returns_none_for_disallowed_tools() -> Non
         allowed_tools=(QueryToolName.SEARCH_SOURCE_CHUNKS,),
     )
 
-    assert decision is None
+    assert decision is not None
+    assert decision.tool_name is QueryToolName.SEARCH_SOURCE_CHUNKS
 
 
 def test_model_backed_query_tool_planner_accepts_valid_model_choice() -> None:

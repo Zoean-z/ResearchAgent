@@ -423,3 +423,6 @@ class _NullChunkRepository(ChunkRepositoryPort):
 
     def list_by_paper_ids(self, paper_ids: Sequence[str]) -> Sequence[Chunk]:
         return []
+
+    def list_by_artifact_id(self, artifact_id: str) -> Sequence[Chunk]:
+        return []

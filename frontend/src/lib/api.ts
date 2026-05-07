@@ -1,6 +1,7 @@
 import type {
   IngestExecution,
   MemorySnapshot,
+  MemoryBundles,
   Message,
   MessageSubmission,
   QueryExecution,
@@ -11,6 +12,8 @@ import type {
   TraceNarrative,
   TraceStep,
 } from "./types";
+
+const CLIENT_API_KEY_STORAGE_KEY = "research-agent-client-api-key";
 
 async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -27,10 +30,13 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
+  const storedApiKey =
+    typeof window === "undefined" ? "" : window.localStorage.getItem(CLIENT_API_KEY_STORAGE_KEY)?.trim() ?? "";
   const response = await fetch(input, {
     headers: {
       Accept: "application/json",
       ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+      ...(storedApiKey ? { "X-Research-Agent-Api-Key": storedApiKey } : {}),
       ...init?.headers,
     },
     ...init,
@@ -54,6 +60,10 @@ export const api = {
   listTimeline: (sessionId: string) => request<{ items: TimelineEvent[] }>(`/api/sessions/${sessionId}/timeline`),
   getMemorySnapshot: (sessionId: string) =>
     request<MemorySnapshot>(`/api/sessions/${sessionId}/memory-snapshot`),
+  getMemoryBundles: (sessionId: string) =>
+    request<MemoryBundles>(`/api/sessions/${sessionId}/memory-bundles`),
+  getGlobalMemoryBundles: () =>
+    request<MemoryBundles>("/api/memories/global-bundles"),
   getTrace: (sessionId: string, runId: string) =>
     request<{ steps: TraceStep[]; narratives: TraceNarrative[] }>(`/api/sessions/${sessionId}/runs/${runId}/trace`),
   getRunEvents: (sessionId: string, runId: string) =>

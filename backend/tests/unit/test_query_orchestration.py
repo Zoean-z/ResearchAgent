@@ -43,9 +43,14 @@ def test_query_orchestration_runner_allows_the_next_expected_tool() -> None:
     assert selection.allowed_tools == (
         QueryToolName.SEARCH_GLOBAL_MEMORY,
         QueryToolName.SEARCH_OPENVIKING_MEMORY,
+        QueryToolName.LIST_SESSION_PAPERS,
+        QueryToolName.GET_PAPER_MEMORY_BUNDLE,
+        QueryToolName.SEARCH_SOURCE_CHUNKS,
         QueryToolName.RERANK_CANDIDATES,
         QueryToolName.READ_SOURCE_PASSAGES,
         QueryToolName.COMPOSE_ANSWER,
+        QueryToolName.LIST_RECENT_MESSAGES,
+        QueryToolName.GET_CONVERSATION_CONTEXT,
     )
     assert selection.final_answer_allowed is True
     assert selection.decision.tool_name is QueryToolName.SEARCH_GLOBAL_MEMORY
@@ -53,9 +58,14 @@ def test_query_orchestration_runner_allows_the_next_expected_tool() -> None:
     assert client.last_request.allowed_actions == (
         "search_global_memory",
         "search_openviking_memory",
+        "list_session_papers",
+        "get_paper_memory_bundle",
+        "search_source_chunks",
         "rerank_candidates",
         "read_source_passages",
         "compose_answer",
+        "list_recent_messages",
+        "get_conversation_context",
     )
     assert client.last_request.observations[0].kind == "memory_search"
 
@@ -82,9 +92,14 @@ def test_query_orchestration_runner_exposes_openviking_memory_as_companion_tool(
         QueryToolName.SEARCH_SESSION_MEMORY,
         QueryToolName.SEARCH_GLOBAL_MEMORY,
         QueryToolName.SEARCH_OPENVIKING_MEMORY,
+        QueryToolName.LIST_SESSION_PAPERS,
+        QueryToolName.GET_PAPER_MEMORY_BUNDLE,
+        QueryToolName.SEARCH_SOURCE_CHUNKS,
         QueryToolName.RERANK_CANDIDATES,
         QueryToolName.READ_SOURCE_PASSAGES,
         QueryToolName.COMPOSE_ANSWER,
+        QueryToolName.LIST_RECENT_MESSAGES,
+        QueryToolName.GET_CONVERSATION_CONTEXT,
     )
     assert selection.decision.tool_name is QueryToolName.SEARCH_OPENVIKING_MEMORY
     assert client.last_request is not None
@@ -92,9 +107,14 @@ def test_query_orchestration_runner_exposes_openviking_memory_as_companion_tool(
         "search_session_memory",
         "search_global_memory",
         "search_openviking_memory",
+        "list_session_papers",
+        "get_paper_memory_bundle",
+        "search_source_chunks",
         "rerank_candidates",
         "read_source_passages",
         "compose_answer",
+        "list_recent_messages",
+        "get_conversation_context",
     )
 
 
@@ -171,8 +191,13 @@ def test_query_orchestration_runner_broadens_the_later_tool_pool_after_rerank() 
 
     assert selection.allowed_tools == (
         QueryToolName.SEARCH_OPENVIKING_MEMORY,
+        QueryToolName.LIST_SESSION_PAPERS,
+        QueryToolName.GET_PAPER_MEMORY_BUNDLE,
+        QueryToolName.SEARCH_SOURCE_CHUNKS,
         QueryToolName.READ_SOURCE_PASSAGES,
         QueryToolName.COMPOSE_ANSWER,
+        QueryToolName.LIST_RECENT_MESSAGES,
+        QueryToolName.GET_CONVERSATION_CONTEXT,
     )
     assert selection.final_answer_allowed is True
     assert selection.decision.tool_name is QueryToolName.READ_SOURCE_PASSAGES
@@ -207,6 +232,11 @@ def test_query_orchestration_runner_does_not_reoffer_completed_tools_in_the_unif
     assert QueryToolName.RERANK_CANDIDATES not in selection.allowed_tools
     assert selection.allowed_tools == (
         QueryToolName.SEARCH_OPENVIKING_MEMORY,
+        QueryToolName.LIST_SESSION_PAPERS,
+        QueryToolName.GET_PAPER_MEMORY_BUNDLE,
+        QueryToolName.SEARCH_SOURCE_CHUNKS,
         QueryToolName.READ_SOURCE_PASSAGES,
         QueryToolName.COMPOSE_ANSWER,
+        QueryToolName.LIST_RECENT_MESSAGES,
+        QueryToolName.GET_CONVERSATION_CONTEXT,
     )

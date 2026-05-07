@@ -34,14 +34,26 @@ class InMemorySessionRepository(SessionRepositoryPort):
         return deleted
 
     def save_document(self, session_document: SessionDocument) -> SessionDocument:
-        documents = [document for document in self._documents_by_session[session_document.session_id] if document.id != session_document.id]
+        documents = [
+            document
+            for document in self._documents_by_session[session_document.session_id]
+            if document.id != session_document.id and document.paper_id != session_document.paper_id
+        ]
         documents.append(session_document)
         documents.sort(key=lambda document: document.added_at)
         self._documents_by_session[session_document.session_id] = documents
-        return session_document
+        return self.get_document(session_document.session_id, session_document.paper_id) or session_document
 
     def list_documents(self, session_id: str) -> list[SessionDocument]:
         return list(self._documents_by_session.get(session_id, []))
+
+    def list_all_documents(self) -> list[SessionDocument]:
+        documents = [document for items in self._documents_by_session.values() for document in items]
+        documents.sort(key=lambda document: document.added_at)
+        return documents
+
+    def get_document(self, session_id: str, paper_id: str) -> SessionDocument | None:
+        return next((document for document in self._documents_by_session.get(session_id, []) if document.paper_id == paper_id), None)
 
     def delete_documents(self, session_id: str) -> int:
         documents = self._documents_by_session.pop(session_id, [])

@@ -41,7 +41,7 @@ class SQLiteSessionRepository(SessionRepositoryPort):
         return self._row_to_session(row) if row is not None else None
 
     def list_all(self) -> Sequence[Session]:
-        rows = self._database.query_all("SELECT * FROM sessions ORDER BY created_at ASC")
+        rows = self._database.query_all("SELECT * FROM sessions WHERE status != 'deleted' ORDER BY created_at ASC")
         return [self._row_to_session(row) for row in rows]
 
     def delete(self, session_id: str) -> Session | None:
@@ -60,7 +60,7 @@ class SQLiteSessionRepository(SessionRepositoryPort):
             """
             INSERT INTO session_documents (id, session_id, paper_id, source_type, artifact_id, added_at)
             VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
+            ON CONFLICT(session_id, paper_id) DO UPDATE SET
                 session_id = excluded.session_id,
                 paper_id = excluded.paper_id,
                 source_type = excluded.source_type,
@@ -76,7 +76,8 @@ class SQLiteSessionRepository(SessionRepositoryPort):
                 session_document.added_at.isoformat(),
             ),
         )
-        return session_document
+        persisted = self.get_document(session_document.session_id, session_document.paper_id)
+        return persisted if persisted is not None else session_document
 
     def list_documents(self, session_id: str) -> Sequence[SessionDocument]:
         rows = self._database.query_all(
@@ -84,6 +85,17 @@ class SQLiteSessionRepository(SessionRepositoryPort):
             (session_id,),
         )
         return [self._row_to_document(row) for row in rows]
+
+    def list_all_documents(self) -> Sequence[SessionDocument]:
+        rows = self._database.query_all("SELECT * FROM session_documents ORDER BY added_at ASC")
+        return [self._row_to_document(row) for row in rows]
+
+    def get_document(self, session_id: str, paper_id: str) -> SessionDocument | None:
+        row = self._database.query_one(
+            "SELECT * FROM session_documents WHERE session_id = ? AND paper_id = ? ORDER BY added_at ASC LIMIT 1",
+            (session_id, paper_id),
+        )
+        return self._row_to_document(row) if row is not None else None
 
     def delete_documents(self, session_id: str) -> int:
         rows = self._database.query_all("SELECT id FROM session_documents WHERE session_id = ?", (session_id,))

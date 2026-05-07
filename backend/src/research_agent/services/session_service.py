@@ -32,4 +32,6 @@ class SessionService:
         session = self._session_repository.get_by_id(session_id)
         if session is None:
             raise EntityNotFoundError("Session", session_id)
+        if session.status == "deleted":
+            raise EntityNotFoundError("Session", session_id)
         return session

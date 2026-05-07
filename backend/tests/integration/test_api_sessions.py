@@ -1,16 +1,19 @@
-"""Integration tests for the mock session API."""
+﻿"""Integration tests for the mock session API."""
 
 from __future__ import annotations
+
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
 from research_agent.domain.enums import ArtifactKind, RelationType, SourceType
-from research_agent.domain.models import Artifact, Chunk, Paper, PaperMemory, RelationMemory, SessionDocument, SourceRef
+from research_agent.domain.models import Artifact, Chunk, OpenQuestionMemory, Paper, PaperMemory, RelationMemory, Session, SessionDocument, SourceRef
 from research_agent.domain.policies import build_canonical_key
 from research_agent.domain.value_objects import ConfidenceScore
 from research_agent.api.app import create_app
 from research_agent.services.ingest_materialization_service import IngestMaterializationService
+from research_agent.services.query_execution_service import QueryExecutionError, QueryFailureDetail
 
 
 def _escape_pdf_text(text: str) -> str:
@@ -56,6 +59,11 @@ def _stub_arxiv_download(monkeypatch) -> None:
         "_download_arxiv_pdf",
         lambda self, pdf_url, source_value: _build_minimal_pdf_bytes("ArXiv integration text that should be extracted."),
     )
+
+
+@pytest.fixture(autouse=True)
+def _stub_query_agent_backend(monkeypatch) -> None:
+    monkeypatch.setenv("RESEARCH_AGENT_QUERY_AGENT_BACKEND", "test_stub")
 
 
 def test_health_endpoint(tmp_path) -> None:
@@ -112,6 +120,7 @@ def test_empty_session_views_return_stable_shapes(tmp_path) -> None:
         messages_response = client.get(f"/api/sessions/{session_id}/messages")
         timeline_response = client.get(f"/api/sessions/{session_id}/timeline")
         snapshot_response = client.get(f"/api/sessions/{session_id}/memory-snapshot")
+        bundles_response = client.get(f"/api/sessions/{session_id}/memory-bundles")
 
     assert messages_response.status_code == 200
     assert messages_response.json() == {"items": []}
@@ -125,6 +134,270 @@ def test_empty_session_views_return_stable_shapes(tmp_path) -> None:
         "relation_memories": [],
         "open_question_memories": [],
     }
+
+    assert bundles_response.status_code == 200
+    assert bundles_response.json() == {"papers": [], "unscoped_memories": []}
+
+
+def test_memory_bundles_endpoint_groups_paper_memories(tmp_path) -> None:
+    with _build_client(tmp_path) as client:
+        session_response = client.post("/api/sessions", json={"title": "Bundles"})
+        session_id = session_response.json()["id"]
+        repositories = client.app.state.repositories
+
+        paper_one = repositories.papers.save(
+            Paper(
+                id="paper-1",
+                canonical_key=build_canonical_key(pdf_checksum="checksum-1"),
+                title="Paper One",
+                authors=["Alice"],
+                abstract="Abstract one.",
+                pdf_fingerprint="checksum-1",
+            )
+        )
+        paper_two = repositories.papers.save(
+            Paper(
+                id="paper-2",
+                canonical_key=build_canonical_key(pdf_checksum="checksum-2"),
+                title="Paper Two",
+                authors=["Bob"],
+                abstract="Abstract two.",
+                pdf_fingerprint="checksum-2",
+            )
+        )
+        artifact_one = repositories.artifacts.save(
+            Artifact(
+                id="artifact-1",
+                kind=ArtifactKind.LOCAL_PDF,
+                uri_or_path=r"C:\\papers\\paper-one.pdf",
+                checksum="checksum-1",
+                page_count=2,
+            )
+        )
+        artifact_two = repositories.artifacts.save(
+            Artifact(
+                id="artifact-2",
+                kind=ArtifactKind.LOCAL_PDF,
+                uri_or_path=r"C:\\papers\\paper-two.pdf",
+                checksum="checksum-2",
+                page_count=2,
+            )
+        )
+        repositories.sessions.save_document(
+            SessionDocument(
+                session_id=session_id,
+                paper_id=paper_one.id,
+                source_type=SourceType.PDF,
+                artifact_id=artifact_one.id,
+            )
+        )
+        repositories.sessions.save_document(
+            SessionDocument(
+                session_id=session_id,
+                paper_id=paper_two.id,
+                source_type=SourceType.PDF,
+                artifact_id=artifact_two.id,
+            )
+        )
+        repositories.chunks.save_many(
+            [
+                Chunk(
+                    id="chunk-1",
+                    paper_id=paper_one.id,
+                    artifact_id=artifact_one.id,
+                    text="Paper one chunk text.",
+                    page=1,
+                    section="Introduction",
+                ),
+                Chunk(
+                    id="chunk-2",
+                    paper_id=paper_two.id,
+                    artifact_id=artifact_two.id,
+                    text="Paper two chunk text.",
+                    page=1,
+                    section="Introduction",
+                ),
+            ]
+        )
+        repositories.memories.upsert_paper_memory(
+            PaperMemory(
+                paper_id=paper_one.id,
+                problem="Problem one",
+                method="Method one",
+                key_results=["Result one"],
+                limitations=["Limit one"],
+                novelty_claim="Novelty one",
+                source_refs=[SourceRef(paper_id=paper_one.id, artifact_id=artifact_one.id, chunk_id="chunk-1", quote="Paper one chunk text.")],
+                confidence=ConfidenceScore(value=0.8),
+                updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+        repositories.memories.upsert_relation_memory(
+            RelationMemory(
+                source_paper=paper_one.id,
+                target_paper=paper_two.id,
+                relation_type=RelationType.IMPROVES_ON,
+                summary="Paper one improves on paper two.",
+                evidence=["Paper one is stronger."],
+                confidence=ConfidenceScore(value=0.7),
+                updated_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+            )
+        )
+        repositories.memories.upsert_open_question_memory(
+            OpenQuestionMemory(
+                unresolved_question="Does it generalize?",
+                related_papers=[paper_one.id, paper_two.id],
+                why_open=["No cross-domain test."],
+                possible_followup=["Run domain shift evaluation."],
+                confidence=ConfidenceScore(value=0.5),
+                updated_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
+            )
+        )
+
+        bundles_response = client.get(f"/api/sessions/{session_id}/memory-bundles")
+
+    assert bundles_response.status_code == 200
+    payload = bundles_response.json()
+    assert len(payload["papers"]) == 2
+    paper_one_group = next(item for item in payload["papers"] if item["paper"]["paper_id"] == "paper-1")
+    paper_two_group = next(item for item in payload["papers"] if item["paper"]["paper_id"] == "paper-2")
+    assert paper_one_group["paper"]["title"] == "Paper One"
+    assert paper_one_group["paper"]["file_name"] == "paper-one.pdf"
+    assert paper_one_group["paper"]["memory_count"] == 3
+    assert paper_one_group["relation_memories"][0]["relation_direction"] == "source"
+    assert paper_two_group["relation_memories"][0]["relation_direction"] == "target"
+    assert payload["unscoped_memories"] == []
+
+
+def test_global_memory_bundles_endpoint_groups_paper_memories(tmp_path) -> None:
+    with _build_client(tmp_path) as client:
+        repositories = client.app.state.repositories
+        session_one = repositories.sessions.save(Session(id="session-1", title="Global One"))
+        session_two = repositories.sessions.save(Session(id="session-2", title="Global Two"))
+
+        paper_one = repositories.papers.save(
+            Paper(
+                id="paper-1",
+                canonical_key=build_canonical_key(pdf_checksum="checksum-1"),
+                title="Paper One",
+                authors=["Alice"],
+                abstract="Abstract one.",
+                pdf_fingerprint="checksum-1",
+            )
+        )
+        paper_two = repositories.papers.save(
+            Paper(
+                id="paper-2",
+                canonical_key=build_canonical_key(pdf_checksum="checksum-2"),
+                title="Paper Two",
+                authors=["Bob"],
+                abstract="Abstract two.",
+                pdf_fingerprint="checksum-2",
+            )
+        )
+        artifact_one = repositories.artifacts.save(
+            Artifact(
+                id="artifact-1",
+                kind=ArtifactKind.LOCAL_PDF,
+                uri_or_path=r"C:\\papers\\paper-one.pdf",
+                checksum="checksum-1",
+                page_count=2,
+            )
+        )
+        artifact_two = repositories.artifacts.save(
+            Artifact(
+                id="artifact-2",
+                kind=ArtifactKind.LOCAL_PDF,
+                uri_or_path=r"C:\\papers\\paper-two.pdf",
+                checksum="checksum-2",
+                page_count=2,
+            )
+        )
+        document_one = repositories.sessions.save_document(
+            SessionDocument(
+                session_id=session_one.id,
+                paper_id=paper_one.id,
+                source_type=SourceType.PDF,
+                artifact_id=artifact_one.id,
+            )
+        )
+        repositories.sessions.save_document(
+            SessionDocument(
+                session_id=session_two.id,
+                paper_id=paper_two.id,
+                source_type=SourceType.PDF,
+                artifact_id=artifact_two.id,
+            )
+        )
+        repositories.chunks.save_many(
+            [
+                Chunk(
+                    id="chunk-1",
+                    paper_id=paper_one.id,
+                    artifact_id=artifact_one.id,
+                    text="Paper one chunk text.",
+                    page=1,
+                    section="Introduction",
+                ),
+                Chunk(
+                    id="chunk-2",
+                    paper_id=paper_two.id,
+                    artifact_id=artifact_two.id,
+                    text="Paper two chunk text.",
+                    page=1,
+                    section="Introduction",
+                ),
+            ]
+        )
+        repositories.memories.upsert_paper_memory(
+            PaperMemory(
+                paper_id=paper_one.id,
+                problem="Problem one",
+                method="Method one",
+                key_results=["Result one"],
+                limitations=["Limit one"],
+                novelty_claim="Novelty one",
+                source_refs=[SourceRef(paper_id=paper_one.id, artifact_id=artifact_one.id, chunk_id="chunk-1", quote="Paper one chunk text.")],
+                confidence=ConfidenceScore(value=0.8),
+                updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+        repositories.memories.upsert_relation_memory(
+            RelationMemory(
+                source_paper=paper_one.id,
+                target_paper=paper_two.id,
+                relation_type=RelationType.IMPROVES_ON,
+                summary="Paper one improves on paper two.",
+                evidence=["Paper one is stronger."],
+                confidence=ConfidenceScore(value=0.7),
+                updated_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+            )
+        )
+        repositories.memories.upsert_open_question_memory(
+            OpenQuestionMemory(
+                unresolved_question="Does it generalize?",
+                related_papers=[paper_one.id, paper_two.id],
+                why_open=["No cross-domain test."],
+                possible_followup=["Run domain shift evaluation."],
+                confidence=ConfidenceScore(value=0.5),
+                updated_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
+            )
+        )
+
+        bundles_response = client.get("/api/memories/global-bundles")
+
+    assert bundles_response.status_code == 200
+    payload = bundles_response.json()
+    assert len(payload["papers"]) == 2
+    paper_one_group = next(item for item in payload["papers"] if item["paper"]["paper_id"] == "paper-1")
+    paper_two_group = next(item for item in payload["papers"] if item["paper"]["paper_id"] == "paper-2")
+    assert paper_one_group["paper"]["title"] == "Paper One"
+    assert paper_one_group["paper"]["file_name"] == "paper-one.pdf"
+    assert paper_one_group["paper"]["created_at"] == document_one.added_at.isoformat().replace("+00:00", "Z")
+    assert paper_one_group["paper"]["memory_count"] == 3
+    assert paper_one_group["relation_memories"][0]["relation_direction"] == "source"
+    assert paper_two_group["relation_memories"][0]["relation_direction"] == "target"
+    assert payload["unscoped_memories"] == []
 
 
 def test_acceptance_endpoints_create_messages_and_task_runs(tmp_path) -> None:
@@ -396,10 +669,9 @@ def test_query_execution_endpoint_runs_mock_retrieval_chain(tmp_path) -> None:
     assert payload["task_run"]["step_count"] == 6
     assert payload["should_reread_source"] is False
     assert payload["session_memory_count"] >= 1
-    assert payload["global_memory_count"] >= 1
+    assert payload["global_memory_count"] == 0
+    assert payload["answer"] == "Model-generated final answer."
     assert "Mock answer for:" not in payload["answer"]
-    assert "记忆" in payload["answer"]
-    assert "当前" in payload["answer"] or "根据当前记忆" in payload["answer"]
     assert payload["used_memory_citations"]
     assert payload["used_memory_citations"][0]["selection_reason"].startswith("type=")
     assert "rerank_strategy=model" in payload["used_memory_citations"][0]["selection_reason"]
@@ -408,6 +680,12 @@ def test_query_execution_endpoint_runs_mock_retrieval_chain(tmp_path) -> None:
     assert payload["memory_selection_fallback_used"] is False
     assert payload["source_selection_source"] == "rule_fallback"
     assert payload["source_selection_fallback_used"] is True
+    assert payload["debug"]["decisions"][0]["tool_name"] == "search_session_memory"
+    assert payload["debug"]["decisions"][0]["turn_index"] == 0
+    assert payload["debug"]["decisions"][-1]["action_type"] == "final_answer"
+    assert payload["debug"]["decisions"][-1]["final_answer_present"] is True
+    assert payload["debug"]["observations_summary"][0]["kind"] == "memory_search"
+    assert payload["debug"]["observations_summary"][-1]["kind"] == "answer_composition"
 
     assert run_response.status_code == 200
     run_payload = run_response.json()
@@ -422,14 +700,15 @@ def test_query_execution_endpoint_runs_mock_retrieval_chain(tmp_path) -> None:
         "rerank_context_candidates",
         "decide_reread_source",
         "reread_source_passages",
-        "compose_mock_answer",
+        "final_answer",
     ]
     assert trace_payload["steps"][0]["input_payload"]["planner_decision"]["selected_tool"] == "search_session_memory"
     assert trace_payload["steps"][1]["input_payload"]["planner_decision"]["selected_tool"] == "search_global_memory"
     assert trace_payload["steps"][2]["input_payload"]["planner_decision"]["selected_tool"] == "rerank_candidates"
     assert trace_payload["steps"][3]["input_payload"]["planner_decision"]["selected_tool"] == "read_source_passages"
     assert trace_payload["steps"][4]["input_payload"]["planner_decision"]["selected_tool"] == "read_source_passages"
-    assert trace_payload["steps"][5]["input_payload"]["planner_decision"]["selected_tool"] == "compose_answer"
+    assert trace_payload["steps"][5]["input_payload"]["planner_decision"]["action_type"] == "final_answer"
+    assert trace_payload["steps"][5]["input_payload"]["planner_decision"]["selected_tool"] is None
     assert len(trace_payload["narratives"]) == 6
     assert trace_payload["narratives"][0]["reason_text"].startswith(
         "Session memory is checked first"
@@ -442,7 +721,7 @@ def test_query_execution_endpoint_runs_mock_retrieval_chain(tmp_path) -> None:
     assert events_response.status_code == 200
     event_summaries = [item["summary"] for item in events_response.json()["items"]]
     assert event_summaries[0].startswith("checked session memory: paper_memory:paper-memory-1")
-    assert event_summaries[1].startswith("checked global memory: paper_memory:paper-memory-1")
+    assert event_summaries[1] == "checked global memory (no memories)"
     assert event_summaries[2].startswith("reranked context candidates:")
     assert event_summaries[3] == "decided whether to reread"
     assert event_summaries[4].startswith("reread source passages")
@@ -451,7 +730,7 @@ def test_query_execution_endpoint_runs_mock_retrieval_chain(tmp_path) -> None:
     assert timeline_response.status_code == 200
     timeline_summaries = [item["summary"] for item in timeline_response.json()["items"]]
     assert timeline_summaries[0].startswith("checked session memory: paper_memory:paper-memory-1")
-    assert timeline_summaries[1].startswith("checked global memory: paper_memory:paper-memory-1")
+    assert timeline_summaries[1] == "checked global memory (no memories)"
     assert timeline_summaries[2].startswith("reranked context candidates:")
     assert timeline_summaries[3] == "decided whether to reread"
     assert timeline_summaries[4].startswith("reread source passages")
@@ -523,7 +802,7 @@ def test_query_execution_endpoint_rereads_source_chunks_when_memory_is_insuffici
     assert payload["source_reread_chunks"][0]["chunk_id"] == "chunk-1"
     assert "selection_reason" in payload["source_reread_chunks"][0]
     assert "rerank_strategy=model" in payload["source_reread_chunks"][0]["selection_reason"]
-    assert "\u539f\u6587\u56de\u8bfb\u5230\u7684\u5173\u952e\u7247\u6bb5" in payload["answer"]
+    assert payload["answer"] == "Model-generated final answer."
     assert payload["used_memory_citations"] == []
     assert payload["memory_selection_source"] == "rule_fallback"
     assert payload["memory_selection_fallback_used"] is True
@@ -538,11 +817,12 @@ def test_query_execution_endpoint_rereads_source_chunks_when_memory_is_insuffici
         "rerank_context_candidates",
         "decide_reread_source",
         "reread_source_passages",
-        "compose_mock_answer",
+        "final_answer",
     ]
     assert trace_payload["steps"][3]["input_payload"]["planner_decision"]["selected_tool"] == "read_source_passages"
     assert trace_payload["steps"][4]["input_payload"]["planner_decision"]["selected_tool"] == "read_source_passages"
-    assert trace_payload["steps"][5]["input_payload"]["planner_decision"]["selected_tool"] == "compose_answer"
+    assert trace_payload["steps"][5]["input_payload"]["planner_decision"]["action_type"] == "final_answer"
+    assert trace_payload["steps"][5]["input_payload"]["planner_decision"]["selected_tool"] is None
     assert len(trace_payload["narratives"]) == 6
     assert trace_payload["narratives"][4]["reason_text"].startswith(
         "The runtime reranks source passages"
@@ -557,6 +837,49 @@ def test_query_execution_endpoint_rereads_source_chunks_when_memory_is_insuffici
         "reread source passages: chunk-1",
         "query run completed",
     ]
+
+
+def test_query_execution_endpoint_returns_structured_error_detail(tmp_path) -> None:
+    class FailingTaskRuntime:
+        def execute_query_run(self, *, session_id: str, run_id: str):
+            raise QueryExecutionError(
+                QueryFailureDetail(
+                    error_code="model_decision_failed",
+                    failed_stage="model_decision",
+                    error_message="adapter returned no structured decision",
+                    run_id=run_id,
+                    fallback_reason="adapter_validation_failed",
+                    validation_error="missing final_answer",
+                    failure_stage_detail="normalize_choice",
+                    status_code=200,
+                    repair_attempted=True,
+                    raw_response_preview="{\"choices\":[]}",
+                    content_preview="{\"tool_name\":\"compose_answer\"}",
+                )
+            )
+
+    with _build_client(tmp_path) as client:
+        session_response = client.post("/api/sessions", json={"title": "Query Error"})
+        session_id = session_response.json()["id"]
+        accept_response = client.post(f"/api/sessions/{session_id}/queries", json={"query": "触发失败"})
+        run_id = accept_response.json()["run_id"]
+        client.app.state.services.task_runtime = FailingTaskRuntime()
+
+        execute_response = client.post(f"/api/sessions/{session_id}/queries/{run_id}/execute")
+
+    assert execute_response.status_code == 500
+    detail = execute_response.json()["detail"]
+    assert detail["error_code"] == "model_decision_failed"
+    assert detail["failed_stage"] == "model_decision"
+    assert detail["error_message"] == "adapter returned no structured decision"
+    assert detail["run_id"] == run_id
+    assert detail["fallback_reason"] == "adapter_validation_failed"
+    assert detail["validation_error"] == "missing final_answer"
+    assert detail["failure_stage_detail"] == "normalize_choice"
+    assert detail["status_code"] == 200
+    assert detail["repair_attempted"] is True
+    assert detail["raw_response_preview"] == "{\"choices\":[]}"
+    assert detail["content_preview"] == "{\"tool_name\":\"compose_answer\"}"
 
 
 def test_query_start_and_stream_endpoint_publish_live_events(tmp_path) -> None:
@@ -616,7 +939,7 @@ def test_query_start_and_stream_endpoint_publish_live_events(tmp_path) -> None:
     assert "event: assistant_message_committed" in stream_text
     assert "event: run_finished" in stream_text
     assert "\"selected_tool\": \"search_session_memory\"" in stream_text
-    assert "\"action\": \"compose_mock_answer\"" in stream_text
+    assert "\"action\": \"final_answer\"" in stream_text
     assert run_response.status_code == 200
     assert run_response.json()["status"] == "finished"
 
@@ -728,64 +1051,6 @@ def test_create_app_defaults_to_sqlite_when_env_points_to_tmp_path(tmp_path, mon
 
     assert response.status_code == 201
     assert response.json()["title"] == "Default sqlite"
-
-
-def test_model_adapter_planner_backend_falls_back_cleanly_when_transport_is_unavailable(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("RESEARCH_AGENT_QUERY_PLANNER_BACKEND", "model_adapter")
-    monkeypatch.setenv("RESEARCH_AGENT_QUERY_PLANNER_PROVIDER", "deepseek")
-    monkeypatch.setenv("RESEARCH_AGENT_QUERY_PLANNER_MODEL", "deepseekv4flash")
-    monkeypatch.setenv("RESEARCH_AGENT_QUERY_AGENT_BACKEND", "turn_adapter")
-    sqlite_path = tmp_path / "model-planner.sqlite3"
-    with TestClient(create_app(storage_backend="sqlite", sqlite_path=sqlite_path)) as client:
-        session_response = client.post("/api/sessions", json={"title": "Model planner fallback"})
-        session_id = session_response.json()["id"]
-        repositories = client.app.state.repositories
-        repositories.papers.save(
-            Paper(
-                id="paper-1",
-                canonical_key=build_canonical_key(arxiv_id="2401.12345"),
-                title="Fallback paper",
-            )
-        )
-        repositories.artifacts.save(
-            Artifact(
-                id="artifact-1",
-                kind=ArtifactKind.LOCAL_PDF,
-                uri_or_path="C:/papers/example.pdf",
-                checksum="artifact-checksum",
-            )
-        )
-        repositories.sessions.save_document(
-            SessionDocument(
-                session_id=session_id,
-                paper_id="paper-1",
-                source_type=SourceType.PDF,
-                artifact_id="artifact-1",
-            )
-        )
-        repositories.memories.upsert_paper_memory(
-            PaperMemory(
-                id="paper-memory-1",
-                paper_id="paper-1",
-                key_results=["Higher accuracy"],
-                source_refs=[SourceRef(paper_id="paper-1", artifact_id="artifact-1", quote="higher accuracy")],
-                confidence=ConfidenceScore(value=0.9),
-            )
-        )
-        accept_response = client.post(
-            f"/api/sessions/{session_id}/queries",
-            json={"query": "Did it improve accuracy?"},
-        )
-        run_id = accept_response.json()["run_id"]
-        execute_response = client.post(f"/api/sessions/{session_id}/queries/{run_id}/execute")
-        trace_response = client.get(f"/api/sessions/{session_id}/runs/{run_id}/trace")
-
-    assert execute_response.status_code == 200
-    assert trace_response.status_code == 200
-    steps = trace_response.json()["steps"]
-    assert steps[0]["input_payload"]["planner_decision"]["agent_name"] == "deepseek:deepseek-v4-flash"
-    assert steps[0]["input_payload"]["planner_decision"]["fallback_used"] is True
-
 
 def test_create_app_loads_settings_from_env_file(tmp_path, monkeypatch) -> None:
     env_path = tmp_path / "repo.env"

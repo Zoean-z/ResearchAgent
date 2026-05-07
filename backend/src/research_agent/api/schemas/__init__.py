@@ -13,6 +13,13 @@ from research_agent.api.schemas.memory import (
     PaperMemoryResponse,
     RelationMemoryResponse,
 )
+from research_agent.api.schemas.memory_bundles import (
+    MemoryBundleGroupResponse,
+    MemoryBundleItemResponse,
+    MemoryBundlePaperInfoResponse,
+    MemoryBundleSourceChunkResponse,
+    MemoryBundlesResponse,
+)
 from research_agent.api.schemas.deletions import DeleteMemoryResponse, DeleteSessionResponse
 from research_agent.api.schemas.messages import (
     MessageIntakeRequest,
@@ -23,6 +30,7 @@ from research_agent.api.schemas.messages import (
 from research_agent.api.schemas.queries import FollowupQueryRequest, QueryAcceptedResponse
 from research_agent.api.schemas.query_execution import (
     MemoryCitationResponse,
+    QueryExecutionErrorResponse,
     QueryExecutionResponse,
     SourceRereadChunkResponse,
 )
@@ -44,6 +52,11 @@ __all__ = [
     "IngestExecutionResponse",
     "PaperSummaryResponse",
     "MemorySnapshotResponse",
+    "MemoryBundleGroupResponse",
+    "MemoryBundleItemResponse",
+    "MemoryBundlePaperInfoResponse",
+    "MemoryBundleSourceChunkResponse",
+    "MemoryBundlesResponse",
     "MessageIntakeRequest",
     "MessageListResponse",
     "MessageResponse",
@@ -53,6 +66,7 @@ __all__ = [
     "QueryAcceptedResponse",
     "MemoryCitationResponse",
     "QueryExecutionResponse",
+    "QueryExecutionErrorResponse",
     "SourceRereadChunkResponse",
     "RelationMemoryResponse",
     "SessionListResponse",

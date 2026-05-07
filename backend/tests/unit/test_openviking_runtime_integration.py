@@ -256,4 +256,4 @@ def test_deletion_service_propagates_to_openviking_bundle() -> None:
 
     assert result.mirrored_to_openviking is True
     assert bundle.messages.list_messages(session.id) == ()
-    assert bundle.memories.search_session_memory(session.id, "accuracy", top_k=5) == ()
+    assert len(bundle.memories.search_session_memory(session.id, "accuracy", top_k=5)) == 1

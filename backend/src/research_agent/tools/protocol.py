@@ -9,9 +9,13 @@ Query tool subset (frozen for Phase 1):
   - search_session_memory
   - search_global_memory
   - search_source_chunks
+  - list_recent_messages
+  - get_conversation_context
   - rerank_candidates
   - read_source_passages
   - compose_answer
+  - list_session_papers
+  - get_paper_memory_bundle
 """
 
 from __future__ import annotations
@@ -40,6 +44,10 @@ class QueryToolName(StrEnum):
     SEARCH_GLOBAL_MEMORY = "search_global_memory"
     SEARCH_OPENVIKING_MEMORY = "search_openviking_memory"
     SEARCH_SOURCE_CHUNKS = "search_source_chunks"
+    LIST_RECENT_MESSAGES = "list_recent_messages"
+    GET_CONVERSATION_CONTEXT = "get_conversation_context"
+    LIST_SESSION_PAPERS = "list_session_papers"
+    GET_PAPER_MEMORY_BUNDLE = "get_paper_memory_bundle"
     RERANK_CANDIDATES = "rerank_candidates"
     READ_SOURCE_PASSAGES = "read_source_passages"
     COMPOSE_ANSWER = "compose_answer"
@@ -140,6 +148,83 @@ class ChunkDescriptor(BaseModel):
     )
 
 
+class SessionPaperDescriptor(BaseModel):
+    """Paper/document summary visible to the query agent for the current session."""
+
+    paper_id: str
+    title: str
+    file_name: str | None = None
+    created_at: str
+    memory_count: int = Field(ge=0)
+    summary_status: Literal["available", "missing"]
+
+
+class PaperInfoDescriptor(BaseModel):
+    """Stable paper metadata returned in a memory bundle."""
+
+    paper_id: str
+    title: str
+    authors: tuple[str, ...] = Field(default_factory=tuple)
+    abstract: str | None = None
+    year: int | None = None
+    arxiv_id: str | None = None
+    file_name: str | None = None
+    created_at: str | None = None
+
+
+class PaperMemoryBundleDescriptor(BaseModel):
+    """Aggregated memory and evidence view for a single paper."""
+
+    paper: PaperInfoDescriptor
+    paper_memory: dict[str, Any] | None = None
+    open_questions: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+    relations: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+    evidence_source_chunks: tuple[ChunkDescriptor, ...] = Field(default_factory=tuple)
+    empty_fields: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class ConversationEvidenceRefDescriptor(BaseModel):
+    """Compact evidence reference visible in recent conversation context."""
+
+    ref_type: Literal["memory", "chunk"] = Field(description="Which evidence family produced this reference")
+    ref_id: str = Field(description="Stable evidence id")
+    paper_id: str | None = Field(default=None, description="Paper this evidence points to if available")
+    summary: str = Field(description="Short human-readable evidence summary")
+    quote: str | None = Field(default=None, description="Short quoted snippet if available")
+    page: int | None = Field(default=None, description="Page number if known")
+    section: str | None = Field(default=None, description="Section label if known")
+    memory_type: str | None = Field(default=None, description="Memory type when ref_type is memory")
+
+
+class RecentConversationMessageDescriptor(BaseModel):
+    """Compact recent message visible to the query agent."""
+
+    message_id: str = Field(description="Stable message id")
+    role: Literal["user", "assistant"] = Field(description="Message role within the conversation")
+    content: str = Field(description="Compact message content")
+    created_at: str = Field(description="ISO timestamp")
+    paper_id: str | None = Field(default=None, description="Associated paper id if available")
+    run_id: str | None = Field(default=None, description="Associated query run id if available")
+    source_refs: tuple[ConversationEvidenceRefDescriptor, ...] = Field(
+        default_factory=tuple,
+        description="Evidence references attached to the message when available",
+    )
+
+
+class RecentConversationContextDescriptor(BaseModel):
+    """Compact session conversation context injected into each query turn."""
+
+    recent_user_messages: tuple[RecentConversationMessageDescriptor, ...] = Field(default_factory=tuple)
+    recent_assistant_answers: tuple[RecentConversationMessageDescriptor, ...] = Field(default_factory=tuple)
+    active_paper_id: str | None = Field(default=None)
+    active_paper_file_name: str | None = Field(default=None)
+    active_topic: str | None = Field(default=None)
+    last_answer_summary: str | None = Field(default=None)
+    last_evidence_refs: tuple[ConversationEvidenceRefDescriptor, ...] = Field(default_factory=tuple)
+    recent_message_count: int = Field(default=0, ge=0)
+    recent_turn_count: int = Field(default=0, ge=0)
+
+
 # ---------------------------------------------------------------------------
 # Per-tool input models
 # ---------------------------------------------------------------------------
@@ -224,6 +309,31 @@ class ReadSourcePassagesInput(BaseModel):
         default=None, description="Optional paper-id filter"
     )
     top_k: int = Field(default=3, ge=1, le=10, description="Number of top passages to select")
+
+
+class ListSessionPapersInput(BaseModel):
+    """Parameters for listing papers bound to the current runtime session."""
+
+    limit: int = Field(default=20, ge=1, le=100, description="Maximum papers/documents to return")
+
+
+class ListRecentMessagesInput(BaseModel):
+    """Parameters for listing recent conversation messages for the current session."""
+
+    limit: int = Field(default=8, ge=1, le=20, description="Maximum recent query messages to return")
+
+
+class GetConversationContextInput(BaseModel):
+    """Parameters for retrieving the compact recent conversation context."""
+
+    limit: int = Field(default=8, ge=1, le=20, description="Maximum recent query messages to inspect")
+
+
+class GetPaperMemoryBundleInput(BaseModel):
+    """Parameters for retrieving all query-visible memory for one paper."""
+
+    paper_id: str = Field(min_length=1, description="Paper id to inspect")
+    source_chunk_limit: int = Field(default=5, ge=0, le=20, description="Maximum source chunk summaries to include")
 
 
 class ComposeAnswerInput(BaseModel):
@@ -332,6 +442,33 @@ class SearchSourceChunksOutput(BaseModel):
     )
 
 
+class ListSessionPapersOutput(BaseModel):
+    """Result of listing papers/documents for the current session."""
+
+    papers: tuple[SessionPaperDescriptor, ...] = Field(default_factory=tuple)
+    total_count: int = Field(default=0, ge=0)
+
+
+class ListRecentMessagesOutput(BaseModel):
+    """Result of listing recent messages for the current session."""
+
+    messages: tuple[RecentConversationMessageDescriptor, ...] = Field(default_factory=tuple)
+    total_count: int = Field(default=0, ge=0)
+    window_count: int = Field(default=0, ge=0)
+
+
+class GetConversationContextOutput(BaseModel):
+    """Result of retrieving the compact recent conversation context."""
+
+    context: RecentConversationContextDescriptor
+
+
+class GetPaperMemoryBundleOutput(BaseModel):
+    """Result of aggregating memory and evidence for a paper."""
+
+    bundle: PaperMemoryBundleDescriptor
+
+
 class RerankCandidatesOutput(BaseModel):
     """Result of reranking a bounded candidate pool."""
 
@@ -370,17 +507,19 @@ class ReadSourcePassagesOutput(BaseModel):
 
 
 class ComposeAnswerOutput(BaseModel):
-    """Result of composing the final answer."""
+    """Evidence package prepared for the model to generate the final answer."""
 
-    answer: str = Field(description="The composed answer text")
+    evidence_package: str = Field(
+        description="Compact evidence package for the model to use when drafting the final answer"
+    )
     citations: tuple[MemoryDescriptor, ...] = Field(
-        default_factory=tuple, description="Memories cited in the answer"
+        default_factory=tuple, description="Memories cited in the evidence package"
     )
     source_citations: tuple[ChunkDescriptor, ...] = Field(
-        default_factory=tuple, description="Source chunks cited in the answer"
+        default_factory=tuple, description="Source chunks cited in the evidence package"
     )
     memory_influence: str = Field(
-        default="", description="How memory shaped the answer vs. source reread"
+        default="", description="How memory shaped the evidence package vs. source reread"
     )
 
 
@@ -468,10 +607,39 @@ QUERY_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ),
     ToolDefinition(
         name=QueryToolName.SEARCH_SOURCE_CHUNKS,
-        description="Retrieve stored source chunks for papers bound to a session. "
-        "Only called when memory-first retrieval is insufficient.",
+        description="Search stored source chunks for papers bound to a session. "
+        "Use this for original passages, quoted sentences, specific claims, mechanisms, limitations, or evidence snippets.",
         input_model=SearchSourceChunksInput,
         output_model=SearchSourceChunksOutput,
+    ),
+    ToolDefinition(
+        name=QueryToolName.LIST_RECENT_MESSAGES,
+        description="List the most recent follow-up conversation messages for the current session. "
+        "The host injects session_id; use this when you need more conversation history than the compact turn context already provides.",
+        input_model=ListRecentMessagesInput,
+        output_model=ListRecentMessagesOutput,
+    ),
+    ToolDefinition(
+        name=QueryToolName.GET_CONVERSATION_CONTEXT,
+        description="Return the compact recent conversation context for the current session, including recent user and assistant messages, the active paper, the active topic, and recent evidence references. "
+        "The host injects session_id; use this when you need a compact history summary before deciding on the next answer or tool.",
+        input_model=GetConversationContextInput,
+        output_model=GetConversationContextOutput,
+    ),
+    ToolDefinition(
+        name=QueryToolName.LIST_SESSION_PAPERS,
+        description="List papers/documents imported into the current runtime session. "
+        "Use this when the user asks what papers are currently in the session, which documents were imported, or what is available to inspect. "
+        "The host injects session_id; the model may only provide business parameters such as limit.",
+        input_model=ListSessionPapersInput,
+        output_model=ListSessionPapersOutput,
+    ),
+    ToolDefinition(
+        name=QueryToolName.GET_PAPER_MEMORY_BUNDLE,
+        description="Return the memory bundle for one paper_id: paper info, paper memory, open questions, relations, and source chunk summaries. "
+        "Use this when answering around one paper and you need the paper-specific memory bundle.",
+        input_model=GetPaperMemoryBundleInput,
+        output_model=GetPaperMemoryBundleOutput,
     ),
     ToolDefinition(
         name=QueryToolName.RERANK_CANDIDATES,
@@ -490,8 +658,7 @@ QUERY_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ),
     ToolDefinition(
         name=QueryToolName.COMPOSE_ANSWER,
-        description="Compose the final answer from selected memories and optional source "
-        "reread chunks. Returns the answer text with citations and a memory-influence summary.",
+        description="Package selected evidence from memories and optional source reread chunks for the model to use when drafting the final answer.",
         input_model=ComposeAnswerInput,
         output_model=ComposeAnswerOutput,
     ),
@@ -559,8 +726,21 @@ __all__ = [
     "ChunkDescriptor",
     "ComposeAnswerInput",
     "ComposeAnswerOutput",
+    "ConversationEvidenceRefDescriptor",
+    "GetConversationContextInput",
+    "GetConversationContextOutput",
+    "ListRecentMessagesInput",
+    "ListRecentMessagesOutput",
     "MemoryDescriptor",
+    "GetPaperMemoryBundleInput",
+    "GetPaperMemoryBundleOutput",
+    "ListSessionPapersInput",
+    "ListSessionPapersOutput",
+    "RecentConversationContextDescriptor",
+    "RecentConversationMessageDescriptor",
     "OpenVikingHitDescriptor",
+    "PaperInfoDescriptor",
+    "PaperMemoryBundleDescriptor",
     "QueryToolName",
     "QUERY_TOOL_DEFINITIONS",
     "QUERY_TOOL_BY_NAME",
@@ -576,6 +756,7 @@ __all__ = [
     "SearchSessionMemoryOutput",
     "SearchSourceChunksInput",
     "SearchSourceChunksOutput",
+    "SessionPaperDescriptor",
     "ToolDefinition",
     "ToolError",
     "ToolErrorCode",

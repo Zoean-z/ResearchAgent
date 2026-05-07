@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
     page INTEGER,
-    section TEXT
+    section TEXT,
+    text_hash TEXT
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(

@@ -68,4 +68,8 @@ class TaskRunStreamingService:
         try:
             self._task_runtime_service.execute_running_task_run(session_id=session_id, run_id=run_id)
         except Exception as error:
-            self._task_runtime_service.fail_running_task_run(session_id, run_id, str(error))
+            current_run = self._task_run_service.get_run(session_id, run_id)
+            if current_run.status is not TaskRunStatus.RUNNING:
+                return
+            error_detail = error.to_dict() if hasattr(error, "to_dict") else None
+            self._task_runtime_service.fail_running_task_run(session_id, run_id, str(error), error_detail)

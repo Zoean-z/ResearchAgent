@@ -5,8 +5,6 @@ from __future__ import annotations
 from research_agent.adapters.llm import ModelBackedQueryAgentClient, StaticStructuredQueryAgentTransport
 from research_agent.runtime.agent_protocol import AgentActionType, AgentObservation, AgentStopReason, AgentTurnRequest
 from research_agent.tools import (
-    HeuristicQueryToolPlannerClient,
-    PlannerBackedQueryAgentClient,
     QueryAgentDecision,
     QueryAgentState,
     QueryToolName,
@@ -33,7 +31,7 @@ def test_query_agent_state_builds_agent_turn_request() -> None:
     assert request.completed_actions == ("search_session_memory",)
     assert request.final_answer_allowed is True
     assert request.state_summary.startswith("completed=search_session_memory")
-    assert "Compose the final answer" in request.tool_descriptions["compose_answer"]
+    assert "evidence" in request.tool_descriptions["compose_answer"].lower()
     assert request.observations[0].kind == "memory_snapshot"
 
 
@@ -86,7 +84,7 @@ def test_model_backed_query_agent_turn_accepts_model_choice() -> None:
             tool_name="search_global_memory",
             rationale="session_memory_checked_expand_recall",
         ),
-        fallback=PlannerBackedQueryAgentClient(HeuristicQueryToolPlannerClient()),
+        fallback=None,
     )
     request = AgentTurnRequest(
         query="Did it improve accuracy?",
@@ -110,7 +108,7 @@ def test_model_backed_query_agent_turn_falls_back_on_invalid_choice() -> None:
             tool_name="compose_answer",
             rationale="invalid_choice",
         ),
-        fallback=PlannerBackedQueryAgentClient(HeuristicQueryToolPlannerClient()),
+        fallback=None,
     )
     request = AgentTurnRequest(
         query="Did it improve accuracy?",
@@ -121,7 +119,4 @@ def test_model_backed_query_agent_turn_falls_back_on_invalid_choice() -> None:
 
     decision = agent.decide_turn(request)
 
-    assert decision is not None
-    assert decision.action_type is AgentActionType.TOOL_CALL
-    assert decision.tool_name == "search_session_memory"
-    assert "fallback_after_model_adapter_error" in decision.rationale
+    assert decision is None

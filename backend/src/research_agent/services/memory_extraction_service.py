@@ -8,7 +8,7 @@ import re
 from research_agent.domain.enums import RelationType
 from research_agent.domain.models import Chunk, OpenQuestionMemory, Paper, PaperMemory, RelationMemory, SourceRef
 from research_agent.domain.ports import ChunkRepositoryPort, MemoryRepositoryPort, PaperRepositoryPort, SessionRepositoryPort
-from research_agent.domain.policies import merge_open_question_memory, merge_paper_memory, merge_relation_memory
+from research_agent.domain.policies import merge_paper_memory
 from research_agent.domain.value_objects import ConfidenceScore
 from research_agent.adapters.openviking import NoopOpenVikingMemoryGateway, OpenVikingMemoryGateway
 from research_agent.runtime.ingest_extraction import IngestPaperSummaryDraft
@@ -31,6 +31,7 @@ class MemoryExtractionResult:
     open_question_operation: str
     paper_summary: IngestPaperSummaryDraft
     context_summary: str
+    extraction_debug: dict[str, object] | None = None
 
 
 class MemoryExtractionService:
@@ -67,20 +68,14 @@ class MemoryExtractionService:
         paper_decision = merge_paper_memory(paper_existing, paper_memory_incoming)
         paper_memory = self._memory_repository.upsert_paper_memory(paper_decision.record)
 
-        relation_memory: RelationMemory | None = None
-        relation_operation: str | None = None
-        related_paper = self._select_related_paper(session_id=session_id, current_paper_id=paper_id)
-        if analysis.relation_memory is not None:
-            relation_incoming = analysis.relation_memory
-            relation_existing = self._latest_relation_memory(paper.id, related_paper.id) if related_paper is not None else None
-            relation_decision = merge_relation_memory(relation_existing, relation_incoming)
-            relation_memory = self._memory_repository.upsert_relation_memory(relation_decision.record)
-            relation_operation = relation_decision.operation
-
         open_question_incoming = analysis.open_question_memory
-        open_question_existing = self._latest_open_question_memory(paper_id)
-        open_question_decision = merge_open_question_memory(open_question_existing, open_question_incoming)
-        open_question_memory = self._memory_repository.upsert_open_question_memory(open_question_decision.record)
+        open_question_existing = self._latest_open_question_memory_for_paper(paper_id)
+        open_question_record = (
+            open_question_incoming.model_copy(update={"id": open_question_existing.id})
+            if open_question_existing is not None
+            else open_question_incoming
+        )
+        open_question_memory = self._memory_repository.upsert_open_question_memory(open_question_record)
         self._openviking_gateway.mirror_ingest_result(
             session_id=session_id,
             paper=paper,
@@ -90,12 +85,13 @@ class MemoryExtractionService:
         return MemoryExtractionResult(
             paper_memory=paper_memory,
             paper_operation=paper_decision.operation,
-            relation_memory=relation_memory,
-            relation_operation=relation_operation,
+            relation_memory=None,
+            relation_operation=None,
             open_question_memory=open_question_memory,
-            open_question_operation=open_question_decision.operation,
+            open_question_operation="updated" if open_question_existing is not None else "created",
             paper_summary=analysis.paper_summary,
             context_summary=analysis.context_summary,
+            extraction_debug=analysis.extraction_debug,
         )
 
     def _build_paper_memory(
@@ -156,8 +152,6 @@ class MemoryExtractionService:
             why_open = [f"已解析 {len(chunks)} 个文本分块，但未抽取到明确局限性。"]
         possible_followup = self._build_followups(why_open)
         related_papers = [paper.id]
-        if related_paper is not None:
-            related_papers.append(related_paper.id)
         confidence = ConfidenceScore(value=0.5 if why_open else 0.35)
         return OpenQuestionMemory(
             unresolved_question=unresolved_question,
@@ -192,23 +186,17 @@ class MemoryExtractionService:
         return refs
 
     def _select_related_paper(self, session_id: str, current_paper_id: str) -> Paper | None:
-        session_documents = [
-            document
-            for document in self._session_repository.list_documents(session_id)
-            if document.paper_id != current_paper_id
-        ]
-        if session_documents:
-            related_ids = [document.paper_id for document in reversed(session_documents)]
-            papers = self._paper_repository.list_by_ids(related_ids)
-            if papers:
-                return papers[0]
-
-        global_related_ids = self._global_related_paper_ids(current_paper_id)
-        if global_related_ids:
-            papers = self._paper_repository.list_by_ids(global_related_ids)
-            if papers:
-                return papers[0]
         return None
+
+    def _latest_open_question_memory_for_paper(self, paper_id: str) -> OpenQuestionMemory | None:
+        memories = [
+            memory
+            for memory in self._memory_repository.list_all_open_question_memories()
+            if memory.related_papers == [paper_id]
+        ]
+        if not memories:
+            return None
+        return max(memories, key=lambda memory: memory.updated_at)
 
     def _global_related_paper_ids(self, current_paper_id: str) -> list[str]:
         related_ids: list[str] = []

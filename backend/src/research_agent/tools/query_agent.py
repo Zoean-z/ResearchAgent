@@ -96,7 +96,7 @@ class StaticFinalAnswerQueryAgentClient:
         allowed_tools: Sequence[QueryToolName],
         final_answer_allowed: bool,
     ) -> QueryTurnDecision | None:
-        if final_answer_allowed and QueryToolName.COMPOSE_ANSWER in allowed_tools:
+        if final_answer_allowed:
             decision = QueryTurnDecision(
                 action_type="final_answer",
                 final_answer=self._answer_text,
@@ -125,7 +125,7 @@ class StaticFinalAnswerQueryAgentClient:
         state = QueryTurnState(
             completed_tools=tuple(QueryToolName(tool_name) for tool_name in request.completed_actions),
         )
-        if request.final_answer_allowed and "compose_answer" in request.allowed_actions:
+        if request.final_answer_allowed:
             return AgentTurnDecision(
                 action_type=AgentActionType.FINAL_ANSWER,
                 final_answer=self._answer_text,

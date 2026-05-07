@@ -84,16 +84,16 @@ def test_delete_session_tombstones_session_and_clears_runtime_state() -> None:
     assert result.deleted_messages == 1
     assert result.deleted_runs == 1
     assert result.deleted_timeline_events == 1
-    assert result.deleted_memories == 3
+    assert result.deleted_memories == 0
     assert result.mirrored_to_openviking is False
     assert session_repository.get_by_id(session.id).status == "deleted"
     assert message_repository.list_by_session(session.id) == []
     assert trace_repository.get_run(run.id) is None
     assert trace_repository.list_steps(run.id) == []
     assert timeline_repository.list_by_session(session.id) == []
-    assert memory_repository.list_paper_memories_for_papers(["paper-1"]) == []
-    assert memory_repository.list_relation_memories_for_papers(["paper-1"]) == []
-    assert memory_repository.list_open_question_memories_for_papers(["paper-1"]) == []
+    assert {memory.id for memory in memory_repository.list_paper_memories_for_papers(["paper-1"])} == {"paper-memory-1"}
+    assert {memory.id for memory in memory_repository.list_relation_memories_for_papers(["paper-1"])} == {"relation-memory-1"}
+    assert {memory.id for memory in memory_repository.list_open_question_memories_for_papers(["paper-1"])} == {"open-question-1"}
 
 
 @pytest.mark.parametrize(

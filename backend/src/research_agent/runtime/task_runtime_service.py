@@ -11,6 +11,7 @@ from research_agent.domain.ports import TraceRepositoryPort
 from research_agent.runtime.streaming import RuntimeEventBroker, RuntimeStreamEvent
 from research_agent.services.errors import EntityNotFoundError, InvalidTaskRunStateError
 from research_agent.services.ingest_execution_service import IngestExecutionResult, IngestExecutionService
+from research_agent.services.query_execution_models import QueryExecutionError
 from research_agent.services.query_execution_service import QueryExecutionResult, QueryExecutionService
 from research_agent.services.task_run_service import TaskRunService
 
@@ -72,51 +73,71 @@ class TaskRuntimeService:
             raise InvalidTaskRunStateError(run_id, TaskRunStatus.RUNNING.value, task_run.status.value)
 
         message = self._task_run_service.get_message_for_run(session_id, run_id)
+        try:
+            if message.type is MessageType.FOLLOWUP_QUERY:
+                execution_result = self._query_execution_service.execute_query_run(session_id=session_id, run_id=run_id)
+            elif message.type in {MessageType.INGEST_ARXIV, MessageType.INGEST_PDF}:
+                execution_result = self._ingest_execution_service.execute_ingest_run(session_id=session_id, run_id=run_id)
+            else:
+                raise InvalidTaskRunStateError(run_id, "supported task message", message.type.value)
 
-        if message.type is MessageType.FOLLOWUP_QUERY:
-            execution_result = self._query_execution_service.execute_query_run(session_id=session_id, run_id=run_id)
-        elif message.type in {MessageType.INGEST_ARXIV, MessageType.INGEST_PDF}:
-            execution_result = self._ingest_execution_service.execute_ingest_run(session_id=session_id, run_id=run_id)
-        else:
-            raise InvalidTaskRunStateError(run_id, "supported task message", message.type.value)
+            self._write_trace_narratives(run_id, execution_result)
+            step_count = len(self._trace_repository.list_steps(run_id))
 
-        self._write_trace_narratives(run_id, execution_result)
-        step_count = len(self._trace_repository.list_steps(run_id))
-
-        if step_count > self._max_steps:
-            step_limited_run = self._task_run_service.mark_step_limit_reached(session_id, run_id, step_count)
-            if self._runtime_event_broker is not None:
-                self._runtime_event_broker.publish(
-                    RuntimeStreamEvent(
-                        event_type="run_step_limit_reached",
-                        session_id=step_limited_run.session_id,
-                        run_id=step_limited_run.id,
-                        payload={
-                            "task_run": {
-                                "id": step_limited_run.id,
-                                "status": step_limited_run.status.value,
-                                "step_count": step_limited_run.step_count,
-                                "finished_at": step_limited_run.finished_at.isoformat() if step_limited_run.finished_at is not None else None,
-                                "finish_reason": step_limited_run.finish_reason,
-                            }
-                        },
+            if step_count > self._max_steps:
+                step_limited_run = self._task_run_service.mark_step_limit_reached(session_id, run_id, step_count)
+                if self._runtime_event_broker is not None:
+                    self._runtime_event_broker.publish(
+                        RuntimeStreamEvent(
+                            event_type="run_step_limit_reached",
+                            session_id=step_limited_run.session_id,
+                            run_id=step_limited_run.id,
+                            payload={
+                                "task_run": {
+                                    "id": step_limited_run.id,
+                                    "status": step_limited_run.status.value,
+                                    "step_count": step_limited_run.step_count,
+                                    "finished_at": step_limited_run.finished_at.isoformat() if step_limited_run.finished_at is not None else None,
+                                    "finish_reason": step_limited_run.finish_reason,
+                                }
+                            },
+                        )
                     )
-                )
-            return replace(execution_result, task_run=step_limited_run)
+                return replace(execution_result, task_run=step_limited_run)
 
-        self._task_run_service.update_step_count(session_id, run_id, step_count)
-        finished_run = self._task_run_service.finish_run(session_id, run_id, finish_reason=self._finish_reason(execution_result))
-        if self._runtime_event_broker is not None:
-            self._runtime_event_broker.publish_run_finished(finished_run)
-        return replace(execution_result, task_run=finished_run)
+            self._task_run_service.update_step_count(session_id, run_id, step_count)
+            finished_run = self._task_run_service.finish_run(session_id, run_id, finish_reason=self._finish_reason(execution_result))
+            if self._runtime_event_broker is not None:
+                self._runtime_event_broker.publish_run_finished(finished_run)
+            return replace(execution_result, task_run=finished_run)
+        except Exception as error:
+            self._mark_run_failed_if_still_running(session_id=session_id, run_id=run_id, error=error)
+            raise
 
-    def fail_running_task_run(self, session_id: str, run_id: str, reason: str):
+    def fail_running_task_run(self, session_id: str, run_id: str, reason: str, error: dict[str, object] | None = None):
         """Mark a running task as failed and publish a terminal event."""
 
+        step_count = len(self._trace_repository.list_steps(run_id))
+        self._task_run_service.update_step_count(session_id, run_id, step_count)
         failed_run = self._task_run_service.fail_run(session_id, run_id, reason)
         if self._runtime_event_broker is not None:
-            self._runtime_event_broker.publish_run_failed(failed_run, reason)
+            self._runtime_event_broker.publish_run_failed(failed_run, reason, error)
         return failed_run
+
+    def _mark_run_failed_if_still_running(self, *, session_id: str, run_id: str, error: Exception) -> None:
+        current = self._task_run_service.get_run(session_id, run_id)
+        if current.status is not TaskRunStatus.RUNNING:
+            return
+        if isinstance(error, QueryExecutionError):
+            detail = error.to_dict()
+            self.fail_running_task_run(session_id, run_id, error.detail.error_code, detail)
+            return
+        self.fail_running_task_run(
+            session_id,
+            run_id,
+            type(error).__name__,
+            {"error_message": str(error), "error_type": type(error).__name__},
+        )
 
     def _write_trace_narratives(self, run_id: str, execution_result) -> None:
         existing = {narrative.trace_step_id for narrative in self._trace_repository.list_narratives(run_id)}

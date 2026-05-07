@@ -60,6 +60,7 @@ from research_agent.services import (
     ContextRerankService,
     DeletionService,
     MemorySnapshotService,
+    MemoryBundleService,
     MessageQueryService,
     QueryExecutionService,
     RetrievalService,
@@ -75,6 +76,7 @@ from research_agent.services.memory_extraction_service import MemoryExtractionSe
 from research_agent.services.task_run_streaming_service import TaskRunStreamingService
 from research_agent.runtime import RuntimeEventBroker, TaskRuntimeService
 from research_agent.tools import HeuristicQueryToolPlannerClient, InternalToolRegistry, PlannerBackedQueryAgentClient, QueryToolExecutor
+from research_agent.runtime.agent_protocol import AgentActionType, AgentStopReason, AgentTurnDecision, AgentTurnRequest
 
 
 @dataclass(slots=True)
@@ -100,6 +102,7 @@ class ServiceBundle:
     messages: MessageQueryService
     timeline: TimelineQueryService
     memory_snapshot: MemorySnapshotService
+    memory_bundles: MemoryBundleService
     task_runs: TaskRunService
     deletions: DeletionService
     tools: InternalToolRegistry
@@ -210,6 +213,12 @@ def create_service_bundle(repositories: RepositoryBundle) -> ServiceBundle:
         context_rerank_service=context_rerank_service,
         memory_extraction_service=memory_extraction_service,
         openviking_retrieval_adapter=openviking_retrieval_adapter,
+        session_repository=repositories.sessions,
+        message_repository=repositories.messages,
+        trace_repository=repositories.trace,
+        memory_repository=repositories.memories,
+        chunk_repository=repositories.chunks,
+        artifact_repository=repositories.artifacts,
     )
     query_tool_executor = QueryToolExecutor(tool_registry)
     query_tool_planner = _create_query_tool_planner()
@@ -270,6 +279,13 @@ def create_service_bundle(repositories: RepositoryBundle) -> ServiceBundle:
             session_repository=repositories.sessions,
             memory_repository=repositories.memories,
         ),
+        memory_bundles=MemoryBundleService(
+            session_repository=repositories.sessions,
+            paper_repository=repositories.papers,
+            artifact_repository=repositories.artifacts,
+            chunk_repository=repositories.chunks,
+            memory_repository=repositories.memories,
+        ),
         task_runs=task_run_service,
         deletions=deletion_service,
         tools=tool_registry,
@@ -313,24 +329,63 @@ def _create_ingest_extraction_client():
 
 
 def _create_query_agent_client():
-    agent_backend = os.getenv("RESEARCH_AGENT_QUERY_AGENT_BACKEND", "turn_adapter").lower()
+    agent_backend = os.getenv("RESEARCH_AGENT_QUERY_AGENT_BACKEND", "pydantic_ai").lower()
+    if agent_backend == "test_stub":
+        class _SequentialQueryAgentClient:
+            def __init__(self, answer_text: str = "Model-generated final answer.") -> None:
+                self._answer_text = answer_text
+                self._agent_name = "model_adapter"
+
+            @property
+            def agent_name(self) -> str:
+                return self._agent_name
+
+            def decide_turn(self, request: AgentTurnRequest) -> AgentTurnDecision | None:
+                for tool_name in (
+                    "search_session_memory",
+                    "search_global_memory",
+                    "search_openviking_memory",
+                    "rerank_candidates",
+                    "read_source_passages",
+                    "compose_answer",
+                ):
+                    if tool_name in request.allowed_actions:
+                        return AgentTurnDecision(
+                            action_type=AgentActionType.TOOL_CALL,
+                            tool_name=tool_name,
+                            rationale=f"test_stub_selects_{tool_name}",
+                        )
+                if request.final_answer_allowed:
+                    return AgentTurnDecision(
+                        action_type=AgentActionType.FINAL_ANSWER,
+                        final_answer=self._answer_text,
+                        rationale="test_stub_finishes_with_final_answer",
+                        stop_reason=AgentStopReason.FINAL_ANSWER_READY,
+                    )
+                return None
+
+        return _SequentialQueryAgentClient()
     if agent_backend == "pydantic_ai":
         provider = os.getenv("RESEARCH_AGENT_QUERY_AGENT_PROVIDER", "deepseek").lower()
         model = os.getenv("RESEARCH_AGENT_QUERY_AGENT_MODEL", "deepseek-v4-flash")
         base_url = os.getenv("RESEARCH_AGENT_QUERY_AGENT_BASE_URL", "https://api.deepseek.com")
-        fallback = PlannerBackedQueryAgentClient(HeuristicQueryToolPlannerClient())
         if provider == "deepseek":
             return PydanticAIQueryTurnClient(
                 model=model,
                 api_key=os.getenv("DEEPSEEK_API_KEY"),
                 base_url=base_url,
-                fallback=fallback,
+                fallback=None,
                 framework_name="pydantic_ai",
             )
-        return fallback
+        return PydanticAIQueryTurnClient(
+            model=model,
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url=base_url,
+            fallback=None,
+            framework_name="pydantic_ai",
+        )
 
     backend_name = os.getenv("RESEARCH_AGENT_QUERY_PLANNER_BACKEND", "heuristic").lower()
-    heuristic = PlannerBackedQueryAgentClient(HeuristicQueryToolPlannerClient())
     if backend_name == "model_adapter":
         provider = os.getenv("RESEARCH_AGENT_QUERY_PLANNER_PROVIDER", "unconfigured")
         model = os.getenv("RESEARCH_AGENT_QUERY_PLANNER_MODEL", "unconfigured")
@@ -348,10 +403,10 @@ def _create_query_agent_client():
             agent_name = f"{provider}:{model}"
         return ModelBackedQueryAgentClient(
             transport=transport,
-            fallback=heuristic,
+            fallback=None,
             agent_name=agent_name,
         )
-    return heuristic
+    return PlannerBackedQueryAgentClient(HeuristicQueryToolPlannerClient())
 
 
 def _create_openviking_surface_bundle() -> OpenVikingAdapterSurfaceBundle:

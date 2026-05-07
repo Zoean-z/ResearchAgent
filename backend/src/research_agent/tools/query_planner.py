@@ -12,6 +12,7 @@ from research_agent.tools.protocol import ChunkDescriptor, MemoryDescriptor, Que
 HOST_CONTROLLED_QUERY_TOOLS: tuple[QueryToolName, ...] = (
     QueryToolName.SEARCH_SESSION_MEMORY,
     QueryToolName.SEARCH_GLOBAL_MEMORY,
+    QueryToolName.SEARCH_SOURCE_CHUNKS,
     QueryToolName.RERANK_CANDIDATES,
     QueryToolName.READ_SOURCE_PASSAGES,
     QueryToolName.COMPOSE_ANSWER,
@@ -120,6 +121,8 @@ class HeuristicQueryToolPlannerClient:
             return "session_memory_checked_expand_recall_with_global_memory_before_sufficiency_decision"
         if tool_name is QueryToolName.SEARCH_OPENVIKING_MEMORY:
             return "openviking_memory_is_an_explicit_retrieval_surface_before_final_answer_selection"
+        if tool_name is QueryToolName.SEARCH_SOURCE_CHUNKS:
+            return "source_chunk_search_can_surface_original_passages_before_reread_selection"
         if tool_name is QueryToolName.RERANK_CANDIDATES:
             if state.session_memories or state.global_memories:
                 return "bounded_memory_candidates_available_rerank_before_reread_gating"

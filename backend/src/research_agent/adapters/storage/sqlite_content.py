@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from collections.abc import Sequence
 
 from research_agent.adapters.storage.sqlite_common import SQLiteDatabase
@@ -84,6 +85,9 @@ class SQLiteArtifactRepository(ArtifactRepositoryPort):
         self._database = database
 
     def save(self, artifact: Artifact) -> Artifact:
+        existing = self.get_by_checksum(artifact.checksum)
+        if existing is not None and existing.id != artifact.id:
+            return existing
         self._database.execute(
             """
             INSERT INTO artifacts (id, kind, uri_or_path, checksum, page_count)
@@ -108,6 +112,10 @@ class SQLiteArtifactRepository(ArtifactRepositoryPort):
         row = self._database.query_one("SELECT * FROM artifacts WHERE id = ?", (artifact_id,))
         return self._row_to_artifact(row) if row is not None else None
 
+    def get_by_checksum(self, checksum: str) -> Artifact | None:
+        row = self._database.query_one("SELECT * FROM artifacts WHERE checksum = ? ORDER BY rowid ASC LIMIT 1", (checksum,))
+        return self._row_to_artifact(row) if row is not None else None
+
     def _row_to_artifact(self, row) -> Artifact:
         return Artifact.model_validate(
             {
@@ -127,21 +135,48 @@ class SQLiteChunkRepository(ChunkRepositoryPort):
         self._database = database
 
     def save_many(self, chunks: Sequence[Chunk]) -> Sequence[Chunk]:
+        persisted: list[Chunk] = []
         for chunk in chunks:
+            text_hash = sha256(chunk.text.encode("utf-8")).hexdigest()
+            existing = self._database.query_one(
+                """
+                SELECT * FROM chunks
+                WHERE artifact_id = ? AND page IS ? AND text_hash = ?
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (chunk.artifact_id, chunk.page, text_hash),
+            )
+            if existing is not None:
+                if existing["id"] != chunk.id:
+                    persisted.append(self._row_to_chunk(existing))
+                    continue
+                self._database.execute(
+                    """
+                    UPDATE chunks
+                    SET paper_id = ?, artifact_id = ?, text = ?, page = ?, section = ?, text_hash = ?
+                    WHERE id = ?
+                    """,
+                    (chunk.paper_id, chunk.artifact_id, chunk.text, chunk.page, chunk.section, text_hash, chunk.id),
+                )
+                persisted.append(chunk)
+                continue
             self._database.execute(
                 """
-                INSERT INTO chunks (id, paper_id, artifact_id, text, page, section)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO chunks (id, paper_id, artifact_id, text, page, section, text_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     paper_id = excluded.paper_id,
                     artifact_id = excluded.artifact_id,
                     text = excluded.text,
                     page = excluded.page,
-                    section = excluded.section
+                    section = excluded.section,
+                    text_hash = excluded.text_hash
                 """,
-                (chunk.id, chunk.paper_id, chunk.artifact_id, chunk.text, chunk.page, chunk.section),
+                (chunk.id, chunk.paper_id, chunk.artifact_id, chunk.text, chunk.page, chunk.section, text_hash),
             )
-        return chunks
+            persisted.append(chunk)
+        return persisted
 
     def list_by_paper_ids(self, paper_ids: Sequence[str]) -> Sequence[Chunk]:
         if not paper_ids:
@@ -150,6 +185,13 @@ class SQLiteChunkRepository(ChunkRepositoryPort):
         rows = self._database.query_all(
             f"SELECT * FROM chunks WHERE paper_id IN ({placeholders}) ORDER BY id ASC",
             tuple(paper_ids),
+        )
+        return [self._row_to_chunk(row) for row in rows]
+
+    def list_by_artifact_id(self, artifact_id: str) -> Sequence[Chunk]:
+        rows = self._database.query_all(
+            "SELECT * FROM chunks WHERE artifact_id = ? ORDER BY page ASC, id ASC",
+            (artifact_id,),
         )
         return [self._row_to_chunk(row) for row in rows]
 

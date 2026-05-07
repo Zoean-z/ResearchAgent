@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from research_agent.runtime.agent_protocol import AgentActionType, AgentObservation, AgentStopReason, AgentTurnDecision, AgentTurnRequest
 from research_agent.tools.protocol import ChunkDescriptor, MemoryDescriptor, QueryToolName, get_query_tool_definition
@@ -48,6 +48,7 @@ class QueryTurnState:
         allowed_tools: Sequence[QueryToolName],
         final_answer_allowed: bool,
         observations: Sequence[AgentObservation] = (),
+        recent_conversation_context: dict[str, Any] | None = None,
     ) -> AgentTurnRequest:
         return AgentTurnRequest(
             query=query,
@@ -62,6 +63,7 @@ class QueryTurnState:
                 for tool in allowed_tools
             },
             observations=tuple(observations),
+            recent_conversation_context=recent_conversation_context,
         )
 
     def state_summary(self) -> str:
@@ -82,6 +84,7 @@ class QueryTurnDecision:
     action_type: str
     rationale: str
     tool_name: QueryToolName | None = None
+    tool_parameters: dict[str, Any] | None = None
     final_answer: str | None = None
     agent_name: str = "heuristic_agent"
     fallback_used: bool = False
@@ -91,6 +94,7 @@ class QueryTurnDecision:
         return AgentTurnDecision(
             action_type=AgentActionType(self.action_type),
             tool_name=self.tool_name.value if self.tool_name is not None else None,
+            tool_parameters=self.tool_parameters or {},
             final_answer=self.final_answer,
             rationale=self.rationale,
             stop_reason=AgentStopReason.FINAL_ANSWER_READY if self.action_type == "final_answer" else None,
@@ -108,6 +112,7 @@ class QueryTurnDecision:
         return cls(
             action_type=decision.action_type.value,
             tool_name=QueryToolName(decision.tool_name) if decision.tool_name is not None else None,
+            tool_parameters=decision.tool_parameters,
             final_answer=decision.final_answer,
             rationale=decision.rationale,
             agent_name=agent_name,

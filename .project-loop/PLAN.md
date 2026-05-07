@@ -1,6 +1,6 @@
 # Current Goal
 
-Complete the first end-to-end live runtime observation path so both query and ingest runs can start in the background and stream step-level SSE events into the frontend workbench.
+Refactor ingest extraction so paper understanding comes from the model over cleaned evidence chunks, while code only prepares text, manages evidence, and rejects weak or unavailable extractions without template fallback.
 
 # Active Checklist
 
@@ -26,7 +26,7 @@ Complete the first end-to-end live runtime observation path so both query and in
 - [x] Normalize PDF page text before chunking so line-number and hyphenation noise is removed at the source
 - [ ] Refine OpenViking session commit timing so all effective user/assistant messages and ingest summaries land in the same committed session flow
 - [x] Add an embedded OpenViking backend that uses the local library path instead of an external HTTP server
-- [ ] Add a one-command Windows startup script that prepares repo-local OpenViking config, starts the backend, and writes startup logs
+- [x] Add a one-command Windows startup script that prepares repo-local OpenViking config, starts the backend, and writes startup logs
 - [x] Let query runtime choose between local memory search and explicit OpenViking search on the first two retrieval turns
 - [x] Add observations for explicit OpenViking retrieval so the model sees it as a turn-level decision
 - [x] Broaden the tool pool further only after the explicit OpenViking retrieval turn is stable
@@ -41,10 +41,26 @@ Complete the first end-to-end live runtime observation path so both query and in
 - [x] Make the right-side memory drawer scrollable again
 - [ ] Upgrade final assistant answers from event-level commit to token-level text streaming
 - [ ] Bring upload/progress ergonomics and richer run inspection on top of the shared SSE path
-- [x] Add a first host-side anti-stall guardrail that forces `compose_answer` after repeated low-yield query turns
-- [x] Add host-side duplicate-signature suppression so semantically repeated query calls collapse into `compose_answer`
+- [x] Remove `_compose_mock_answer` from the normal query answer path and require `final_answer` for the user-visible response
+- [x] Reduce `compose_answer` to an evidence package tool instead of a user-answer builder
+- [x] Remove host-forced `compose_answer` and duplicate-signature-forced `compose_answer` exits from the normal query loop
+- [x] Switch the default query-agent wiring to the model-driven path instead of heuristic planner as the main route
+- [x] Update query tests so they assert model-generated final answers rather than template/mocked answer text
+- [x] Compact finalization inputs, raise finalization token budget, and retry truncated plain-text answers once
 - [ ] Keep MCP as a later tool-surface option, not the primary persistence path
 - [x] Try an aggressive ingest-extraction trial for imported local PDFs by sending the full document to the model-backed extractor instead of the narrower recall window
+- [x] Run a live-model ingest smoke on `docs/CRE_v2.pdf` and verify that imported-local-PDF summaries stay Chinese and stop collapsing `what_it_is_about` / `problem_solved`
+- [x] Tighten deleted-session visibility so a refreshed frontend does not resurrect tombstoned sessions
+- [x] Restore legacy `turn_adapter` query-agent wiring so DeepSeek-backed query answers do not get misrouted into the incompatible `pydantic_ai` transport
+- [x] Make the Windows startup script import `.env` into the child process so stale shell API keys do not override repo-local credentials at runtime
+- [x] Add schema repair normalization for query-agent model outputs that omit `action_type` or `rationale`
+- [x] After `get_paper_memory_bundle`, jump straight into model finalization instead of asking for another structured decision
+- [x] Add JSON mode and explicit JSON examples to the DeepSeek structured query-decision prompt
+- [x] Inject compact recent conversation context into query turns and expose `list_recent_messages` / `get_conversation_context` as optional query tools
+- [x] Ingest stage-1 stopgap repair removed production fallback/template overwrite paths, disabled cross-paper open-question merge, and disabled weak relation generation
+- [x] Refactor ingest extraction to model-first full-text or hierarchical extraction with evidence-bound field outputs
+- [x] Remove production dependence on keyword scoring and candidate-ranking for paper understanding
+- [x] Keep relation disabled unless there is explicit evidence and stop cross-paper merge entirely
 
 # Decisions
 
@@ -64,8 +80,8 @@ Complete the first end-to-end live runtime observation path so both query and in
 - Query-agent prompts now explicitly bias toward direct `final_answer` for greetings, acknowledgements, capability questions, and other low-context turns where retrieval would not materially improve the answer.
 - The first no-repeat guardrail for the wider query pool is that completed tools are not re-exposed; richer anti-stall behavior still needs a dedicated follow-up slice.
 - Chat-stream inline run cards are now the primary place for tool calls, progress, and evidence; the side inspector should stay focused on memory and timeline only.
-- The first anti-stall rule is generic rather than intent-specific: after three consecutive low-yield query turns, the host forces `compose_answer` instead of letting the loop drift further.
-- Duplicate suppression is also host-owned: repeated calls against the same effective query surface are normalized into one signature, and a repeat signature forces `compose_answer` instead of executing another near-identical tool step.
+- Normal query answers must now come from the model-facing `final_answer` path; host-written template answers are no longer part of the accepted query contract.
+- `compose_answer` is retained only as an evidence/context packaging tool so the model can draft the final answer from structured retrieval output.
 
 # Blockers
 
@@ -74,9 +90,11 @@ Complete the first end-to-end live runtime observation path so both query and in
 - It is not yet confirmed whether deletion should be hard-delete or tombstone for each data class.
 - Assistant-side chat mirroring is now in place for query answers and ingest summaries, but commit timing is still partial and does not yet cover every future assistant/runtime message class.
 - Query runtime now has an explicit `search_openviking_memory` tool and the first two retrieval turns can choose it instead of only the local memory search path.
+- Query turns now receive a compact recent conversation context by default, and the model can optionally fetch a bounded recent-message/context view when follow-up references need more history than the injected summary.
 - Query and ingest now share the same host-owned background start + replayable SSE stream path; the frontend can observe step-level execution live, but assistant text is still committed as a full message rather than token-streamed.
-- Live-model ingest smoke validation still needs to be run against a real DeepSeek-backed extraction transport on representative documents.
+- The old host-side anti-stall and duplicate-signature `compose_answer` exits have been removed from the normal query loop, so the main remaining risk is model unavailability rather than host-composed answer leakage.
+- Live-model ingest still needs broader quality tuning: the DeepSeek-backed smoke on `docs/CRE_v2.pdf` now stays Chinese and keeps `what_it_is_about` / `problem_solved` distinct, but `problem_solved` can still drift toward a method-style sentence when fallback logic takes over.
 
 # Next Step
 
-The next query-runtime slice is to decide whether the final assistant text should become token-streamed before continuing broader frontend polish, now that the first host-side guardrails cover completed-tool no-repeat, repeated low-yield turns, and duplicate effective query signatures. The ingest side is now experimenting with full-document candidate windows for imported local PDFs, so the next check is whether that actually improves the paper-summary and memory output before broadening it further. Keep the Windows startup script and live-model ingest validation in the near-term queue.
+The ingest extraction debug evidence is now recorded in the run trace, including the input chunk ids and the field-level reviews. The next useful slice is final-answer token streaming; after that, only later ingest wording tuning should remain if the model output drifts again.

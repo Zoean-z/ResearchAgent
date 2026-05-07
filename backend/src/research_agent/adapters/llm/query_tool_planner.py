@@ -43,6 +43,7 @@ class StructuredPlannerTransport(Protocol):
 
 
 HttpPost = Callable[[str, dict[str, str], bytes, float], bytes]
+ApiKeyProvider = Callable[[], str | None]
 
 
 class UnavailableStructuredPlannerTransport:
@@ -84,19 +85,22 @@ class DeepSeekStructuredPlannerTransport:
         base_url: str = "https://api.deepseek.com",
         timeout_seconds: float = 30.0,
         http_post: HttpPost | None = None,
+        api_key_provider: ApiKeyProvider | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = self._normalize_model_name(model)
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._http_post = http_post or _default_http_post
+        self._api_key_provider = api_key_provider or (lambda: resolve_api_key(self._api_key))
 
     @property
     def normalized_model(self) -> str:
         return self._model
 
     def choose_next_tool(self, prompt: StructuredPlannerPrompt) -> StructuredPlannerChoice:
-        if not self._api_key:
+        api_key = self._api_key_provider()
+        if not api_key:
             raise RuntimeError("DEEPSEEK_API_KEY is not configured.")
 
         payload = {
@@ -109,10 +113,10 @@ class DeepSeekStructuredPlannerTransport:
         }
         raw_response = self._http_post(
             f"{self._base_url}/chat/completions",
-            {
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            },
+                {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
             json.dumps(payload).encode("utf-8"),
             self._timeout_seconds,
         )
@@ -261,3 +265,4 @@ __all__ = [
     "StructuredPlannerTransport",
     "UnavailableStructuredPlannerTransport",
 ]
+from research_agent.utils import resolve_api_key

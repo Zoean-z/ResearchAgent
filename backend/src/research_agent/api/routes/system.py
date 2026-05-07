@@ -23,11 +23,13 @@ def health() -> HealthResponse:
 def runtime_status() -> RuntimeStatusResponse:
     """Return a safe runtime status snapshot for the frontend."""
 
+    query_agent_backend = os.getenv("RESEARCH_AGENT_QUERY_AGENT_BACKEND", "pydantic_ai")
+
     return RuntimeStatusResponse(
         app_name=get_app_name(),
         storage_backend=os.getenv("RESEARCH_AGENT_STORAGE_BACKEND", "sqlite"),
         sqlite_path=os.getenv("RESEARCH_AGENT_SQLITE_PATH"),
-        query_agent_backend=os.getenv("RESEARCH_AGENT_QUERY_AGENT_BACKEND", "turn_adapter"),
+        query_agent_backend=query_agent_backend,
         query_agent_provider=os.getenv("RESEARCH_AGENT_QUERY_AGENT_PROVIDER", "deepseek"),
         query_agent_model=os.getenv("RESEARCH_AGENT_QUERY_AGENT_MODEL", "deepseek-v4-flash"),
         ingest_extraction_backend=os.getenv("RESEARCH_AGENT_INGEST_EXTRACTION_BACKEND", "heuristic"),

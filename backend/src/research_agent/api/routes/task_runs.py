@@ -15,6 +15,7 @@ from research_agent.api.schemas import (
     IngestArxivRequest,
     IngestPdfRequest,
     IngestExecutionResponse,
+    QueryExecutionErrorResponse,
     QueryExecutionResponse,
     QueryAcceptedResponse,
     PaperSummaryResponse,
@@ -27,6 +28,7 @@ from research_agent.api.schemas import (
     TraceStepResponse,
 )
 from research_agent.services import AcceptedTaskRun, EntityNotFoundError, InvalidIngestSourceError, InvalidTaskRunStateError
+from research_agent.services.query_execution_service import QueryExecutionError
 
 router = APIRouter(prefix="/api/sessions/{session_id}", tags=["task-runs"])
 
@@ -118,6 +120,11 @@ def execute_query_run(
     try:
         result = services.task_runtime.execute_query_run(session_id=session_id, run_id=run_id)
         return QueryExecutionResponse.from_result(result)
+    except QueryExecutionError as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=QueryExecutionErrorResponse.model_validate(error.to_dict()).model_dump(mode="python"),
+        ) from error
     except EntityNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except InvalidTaskRunStateError as error:

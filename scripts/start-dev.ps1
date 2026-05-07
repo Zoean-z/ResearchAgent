@@ -78,6 +78,27 @@ function Ensure-OpenVikingInstalled {
     }
 }
 
+function Import-DotEnvToProcess {
+    param([string]$Path)
+
+    foreach ($rawLine in Get-Content $Path -Encoding utf8) {
+        $line = $rawLine.Trim()
+        if (-not $line -or $line.StartsWith("#")) {
+            continue
+        }
+        $separator = $line.IndexOf("=")
+        if ($separator -lt 1) {
+            continue
+        }
+        $key = $line.Substring(0, $separator).Trim()
+        $value = $line.Substring($separator + 1).Trim()
+        if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+        [Environment]::SetEnvironmentVariable($key, $value, "Process")
+    }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $backendRoot = Join-Path $repoRoot "backend"
 $envPath = Join-Path $repoRoot ".env"
@@ -91,6 +112,7 @@ if (-not (Test-Path $envPath)) {
     throw "Missing `.env`. Copy `.env.example` to `.env` first."
 }
 
+Import-DotEnvToProcess -Path $envPath
 Ensure-RepoLocalOpenVikingConfig -RepoRoot $repoRoot -ConfigPath $openvikingConfigPath
 
 $env:RESEARCH_AGENT_ENV_FILE = $envPath

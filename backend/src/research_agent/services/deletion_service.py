@@ -60,29 +60,18 @@ class DeletionService:
         self._openviking_bundle = openviking_bundle or OpenVikingAdapterSurfaceBundle()
 
     def delete_session(self, session_id: str) -> DeleteSessionResult:
-        """Delete a session's dialogue and mirrored memory state."""
+        """Delete a session's dialogue state without deleting shared memory records."""
 
         session = self._require_session(session_id)
-        paper_ids = [document.paper_id for document in self._session_repository.list_documents(session_id)]
         messages = list(self._message_repository.list_by_session(session_id))
-        paper_memories = list(self._memory_repository.list_paper_memories_for_papers(paper_ids))
-        relation_memories = list(self._memory_repository.list_relation_memories_for_papers(paper_ids))
-        open_question_memories = list(self._memory_repository.list_open_question_memories_for_papers(paper_ids))
 
         deleted_runs = self._trace_repository.delete_runs_for_session(session_id)
         deleted_documents = self._session_repository.delete_documents(session_id)
         deleted_messages = self._message_repository.delete_by_session(session_id)
         deleted_timeline_events = self._timeline_repository.delete_by_session(session_id)
-        deleted_memories = (
-            self._memory_repository.delete_paper_memories_for_papers(paper_ids)
-            + self._memory_repository.delete_relation_memories_for_papers(paper_ids)
-            + self._memory_repository.delete_open_question_memories_for_papers(paper_ids)
-        )
         deleted_session = self._session_repository.delete(session_id)
 
         self._mirror_message_deletions(session_id, messages)
-        self._mirror_memory_deletions(paper_memories + relation_memories + open_question_memories)
-        self._openviking_bundle.sessions.delete_session(session_id)
 
         if deleted_session is None:
             raise EntityNotFoundError("Session", session_id)
@@ -92,7 +81,7 @@ class DeletionService:
             deleted_messages=deleted_messages,
             deleted_runs=deleted_runs,
             deleted_timeline_events=deleted_timeline_events,
-            deleted_memories=deleted_memories,
+            deleted_memories=0,
             mirrored_to_openviking=self._openviking_active(),
         )
 
@@ -151,10 +140,6 @@ class DeletionService:
     def _mirror_message_deletions(self, session_id: str, messages: list[Message]) -> None:
         for message in messages:
             self._openviking_bundle.messages.delete_message(session_id, message.id)
-
-    def _mirror_memory_deletions(self, memories: list[PaperMemory | RelationMemory | OpenQuestionMemory]) -> None:
-        for memory in memories:
-            self._openviking_bundle.memories.delete_memory(memory.id)
 
     def _require_session(self, session_id: str) -> Session:
         session = self._session_repository.get_by_id(session_id)

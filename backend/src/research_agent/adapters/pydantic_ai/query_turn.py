@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+import json
 import logging
 from typing import Any
 
@@ -20,6 +21,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from research_agent.runtime.agent_protocol import AgentTurnDecision, AgentTurnRequest
 from research_agent.runtime.query_turn import QueryTurnClient
 from research_agent.tools.protocol import QueryToolName
+from research_agent.utils import resolve_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -47,42 +49,70 @@ class PydanticAIQueryTurnClient:
     fallback: QueryTurnClient | None = None
     framework_name: str = "pydantic_ai"
     agent: Any | None = None
+    api_key_provider: Any | None = None
 
     def __post_init__(self) -> None:
         if self.agent is not None:
             self._agent = self.agent
+            self._finalization_agent = None
+            self._preconfigured_agent = True
             self._agent_name = f"{self.framework_name}:{_normalize_model_name(self.model)}"
             self._last_agent_name = self._agent_name
             self._last_fallback_used = False
             self._last_fallback_reason = None
             return
 
-        if not self.api_key:
-            self._agent = None
-            self._agent_name = f"{self.framework_name}:{_normalize_model_name(self.model)}"
-            self._last_agent_name = self._agent_name
-            self._last_fallback_used = True
-            self._last_fallback_reason = "pydantic_ai_agent_not_configured"
-            return
-
         normalized_model = _normalize_model_name(self.model)
         self._agent_name = f"{self.framework_name}:{normalized_model}"
         self._last_agent_name = self._agent_name
-        self._last_fallback_used = False
-        self._last_fallback_reason = None
-        provider = self._provider_for(normalized_model)
+        self._last_fallback_used = not bool(self._effective_api_key())
+        self._last_fallback_reason = "pydantic_ai_agent_not_configured" if not self._effective_api_key() else None
+        self._preconfigured_agent = False
+        self._agent = None
+        self._finalization_agent = None
+        self._agent_cache_key = None
+        self._api_key_provider = self.api_key_provider or (lambda: resolve_api_key(self.api_key))
+
+    def _effective_api_key(self) -> str | None:
+        provider = getattr(self, "_api_key_provider", None)
+        if provider is not None:
+            return provider()
+        return resolve_api_key(self.api_key)
+
+    def _ensure_agents(self) -> bool:
+        if getattr(self, "_preconfigured_agent", False):
+            return self._agent is not None
+        effective_api_key = self._effective_api_key()
+        if not effective_api_key:
+            self._agent = None
+            self._finalization_agent = None
+            self._agent_cache_key = None
+            return False
+        if self._agent is not None and self._finalization_agent is not None and self._agent_cache_key == effective_api_key:
+            return True
+        normalized_model = _normalize_model_name(self.model)
+        provider = self._provider_for(normalized_model, effective_api_key)
+        self._finalization_agent = Agent(
+            OpenAIChatModel(normalized_model, provider=provider),
+            deps_type=AgentTurnRequest,
+            output_type=str,
+            name=f"{self._agent_name}:finalizer",
+            model_settings={"max_tokens": 1536, "temperature": 0.0},
+        )
         self._agent = Agent(
             OpenAIChatModel(normalized_model, provider=provider),
             deps_type=AgentTurnRequest,
             output_type=AgentTurnDecision,
             name=self._agent_name,
         )
+        self._agent_cache_key = effective_api_key
 
         @self._agent.instructions
         def _turn_instructions(ctx: RunContext[AgentTurnRequest]) -> str:
             request = ctx.deps
             allowed_actions = ", ".join(request.allowed_actions) or "none"
             completed_actions = ", ".join(request.completed_actions) or "none"
+            recent_context = json.dumps(request.recent_conversation_context or {}, ensure_ascii=True)
             tool_lines = "\n".join(
                 f"- {name}: {description}"
                 for name, description in request.tool_descriptions.items()
@@ -101,6 +131,7 @@ class PydanticAIQueryTurnClient:
                     "You are the query-turn orchestrator for a memory-first paper agent.",
                     "Return a single structured AgentTurnDecision.",
                     "Choose only from the allowed actions.",
+                    "For tool calls, fill tool_parameters with business parameters only; never include runtime context such as session_id.",
                     "Default to final_answer when the user query can already be answered well without another tool call.",
                     "Use tool_call only when another bounded tool will materially improve the answer.",
                     "Use final_answer for greetings, acknowledgements, capability questions, and other low-context turns that do not need retrieval.",
@@ -110,22 +141,48 @@ class PydanticAIQueryTurnClient:
                     "Do not invent tools outside the allowed set.",
                     "Do not emit stop for this runtime slice.",
                     "Treat the observations as the latest execution evidence and let them influence the next turn.",
+                    "Use the recent conversation context to resolve follow-up references like 'this paper' or 'it' when present.",
                     "If the observations are empty and the query is ordinary conversation rather than a research question, answer directly.",
                     f"Allowed actions: {allowed_actions}.",
                     f"Completed actions: {completed_actions}.",
                     f"Final answer allowed: {request.final_answer_allowed}.",
                     f"State summary: {request.state_summary}.",
+                    f"Recent conversation context: {recent_context}.",
                     f"Tool descriptions:\n{tool_lines or '- none'}",
                     f"Observations:\n{observation_lines or '- none'}",
                 ]
             )
 
-    def decide_turn(self, request: AgentTurnRequest) -> AgentTurnDecision | None:
-        if not request.allowed_actions:
-            return None
+        @self._finalization_agent.instructions
+        def _finalization_instructions(ctx: RunContext[AgentTurnRequest]) -> str:
+            request = ctx.deps
+            recent_context = json.dumps(request.recent_conversation_context or {}, ensure_ascii=True)
+            observation_lines = "\n".join(
+                f"- {observation.kind}: {observation.summary}"
+                + (
+                    f" | impact={observation.payload.get('decision_impact')}"
+                    if observation.payload and observation.payload.get("decision_impact")
+                    else ""
+                )
+                for observation in request.observations
+            )
+            return "\n".join(
+                [
+                    "You are the final answer stage for a memory-routed paper agent.",
+                    "Return only the final user-facing answer.",
+                    "Do not output analysis, reasoning steps, JSON, code fences, tool names, or runtime commentary.",
+                    "Do not start with phrases like 'we were asked', 'from the observations', 'let's inspect', or 'therefore'.",
+                    "Default final answer language is Chinese unless the user explicitly asks for English.",
+                    "Use the observations as evidence, but do not restate their structure.",
+                    f"Recent conversation context: {recent_context}.",
+                    f"Observations:\n{observation_lines or '- none'}",
+                ]
+            )
+        return True
 
+    def decide_turn(self, request: AgentTurnRequest) -> AgentTurnDecision | None:
         try:
-            if self._agent is None:
+            if not self._ensure_agents() or self._agent is None:
                 raise RuntimeError("PydanticAI query-turn agent is not configured.")
             result = self._agent.run_sync(request.query, deps=request)
             decision = result.output
@@ -149,6 +206,26 @@ class PydanticAIQueryTurnClient:
             self._last_fallback_used = True
             return fallback_decision
 
+    def generate_final_answer(self, request: AgentTurnRequest) -> str | None:
+        if not self._ensure_agents() or getattr(self, "_finalization_agent", None) is None:
+            return None
+        try:
+            result = self._finalization_agent.run_sync(request.query, deps=request)
+            final_answer = str(result.output).strip()
+            self._last_agent_name = self._agent_name
+            self._last_fallback_used = False
+            self._last_fallback_reason = None
+            if not final_answer:
+                raise RuntimeError("PydanticAI query-finalization agent returned empty content.")
+            return final_answer
+        except Exception as error:
+            self._last_fallback_reason = self._format_fallback_reason(error)
+            logger.warning(
+                "PydanticAI query-finalization agent failed: %s",
+                self._last_fallback_reason,
+            )
+            raise
+
     @property
     def fallback_used(self) -> bool:
         return self._last_fallback_used
@@ -161,10 +238,10 @@ class PydanticAIQueryTurnClient:
     def fallback_reason(self) -> str | None:
         return self._last_fallback_reason
 
-    def _provider_for(self, model: str):
+    def _provider_for(self, model: str, api_key: str):
         if self.base_url.rstrip("/") == "https://api.deepseek.com":
-            return DeepSeekProvider(api_key=self.api_key)
-        return OpenAIProvider(base_url=self.base_url, api_key=self.api_key)
+            return DeepSeekProvider(api_key=api_key)
+        return OpenAIProvider(base_url=self.base_url, api_key=api_key)
 
     def _validate_decision(
         self,

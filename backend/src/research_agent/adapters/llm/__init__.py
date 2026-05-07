@@ -1,8 +1,12 @@
 """LLM adapter boundaries for future model-backed planning and synthesis."""
 
 from research_agent.adapters.llm.query_agent import (
+    DeepSeekHttpResponse,
+    DeepSeekQueryAgentResponseError,
+    DeepSeekRateLimitError,
     DeepSeekStructuredQueryAgentTransport,
     ModelBackedQueryAgentClient,
+    QueryAgentFailureDetail,
     StaticStructuredQueryAgentTransport,
     StructuredQueryAgentChoice,
     StructuredQueryAgentPrompt,
@@ -29,6 +33,9 @@ from research_agent.adapters.llm.query_tool_planner import (
 )
 
 __all__ = [
+    "DeepSeekHttpResponse",
+    "DeepSeekQueryAgentResponseError",
+    "DeepSeekRateLimitError",
     "DeepSeekStructuredQueryAgentTransport",
     "DeepSeekStructuredIngestExtractionTransport",
     "DeepSeekStructuredPlannerTransport",
@@ -50,4 +57,5 @@ __all__ = [
     "UnavailableStructuredIngestExtractionTransport",
     "UnavailableStructuredQueryAgentTransport",
     "UnavailableStructuredPlannerTransport",
+    "QueryAgentFailureDetail",
 ]
