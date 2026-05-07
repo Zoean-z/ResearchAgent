@@ -271,6 +271,9 @@ class SearchSourceChunksInput(BaseModel):
 
     session_id: str = Field(description="Session used to resolve document bindings")
     query: str = Field(min_length=1, description="Natural-language query text")
+    paper_id: str | None = Field(
+        default=None, description="Optional single paper-id to search within; overrides related_paper_ids when set"
+    )
     related_paper_ids: list[str] | None = Field(
         default=None, description="Optional paper-id filter; defaults to session-document paper ids"
     )
@@ -305,6 +308,9 @@ class ReadSourcePassagesInput(BaseModel):
 
     session_id: str = Field(description="Session used to resolve document bindings and chunk storage")
     query: str = Field(min_length=1, description="Natural-language query text")
+    paper_id: str | None = Field(
+        default=None, description="Optional single paper-id to search within; overrides related_paper_ids when set"
+    )
     related_paper_ids: list[str] | None = Field(
         default=None, description="Optional paper-id filter"
     )
@@ -608,7 +614,8 @@ QUERY_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name=QueryToolName.SEARCH_SOURCE_CHUNKS,
         description="Search stored source chunks for papers bound to a session. "
-        "Use this for original passages, quoted sentences, specific claims, mechanisms, limitations, or evidence snippets.",
+        "Use this for original passages, quoted sentences, specific claims, mechanisms, limitations, or evidence snippets. "
+        "Pass paper_id to search within a specific paper (use the paper_id from list_session_papers results).",
         input_model=SearchSourceChunksInput,
         output_model=SearchSourceChunksOutput,
     ),
@@ -652,7 +659,8 @@ QUERY_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name=QueryToolName.READ_SOURCE_PASSAGES,
         description="Combined retrieve-and-rerank for source passages. Searches stored chunks, "
-        "then reranks the candidate pool to produce the final passage selection.",
+        "then reranks the candidate pool to produce the final passage selection. "
+        "Pass paper_id to search within a specific paper (use the paper_id from list_session_papers results).",
         input_model=ReadSourcePassagesInput,
         output_model=ReadSourcePassagesOutput,
     ),

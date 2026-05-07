@@ -205,7 +205,7 @@ class DeepSeekStructuredQueryAgentTransport:
                 "model": self._model,
                 "messages": messages,
                 "response_format": {"type": "json_object"},
-                "max_tokens": 640,
+                "max_tokens": 2048,
                 "temperature": 0.0,
                 "stream": False,
             }
@@ -231,7 +231,13 @@ class DeepSeekStructuredQueryAgentTransport:
                 raise
             except DeepSeekQueryAgentResponseError as error:
                 last_error = error
-                if attempt == 0:
+                logger.warning(
+                    "DeepSeek query-agent response error attempt=%d/3 stage=%s content_preview=%s",
+                    attempt + 1,
+                    error.failure_detail.failure_stage_detail,
+                    (error.failure_detail.content_preview or "")[:200],
+                )
+                if attempt < 2:
                     messages = self._repair_messages_for(
                         prompt=prompt,
                         previous_response=self._raw_response_text(raw_response.body),
@@ -239,7 +245,7 @@ class DeepSeekStructuredQueryAgentTransport:
                     )
                     continue
                 raise DeepSeekQueryAgentResponseError(
-                    f"DeepSeek query-agent response could not be repaired after one retry: {error}",
+                    f"DeepSeek query-agent response could not be repaired after 2 retries: {error}",
                     failure_detail=QueryAgentFailureDetail(
                         failure_stage_detail=error.failure_detail.failure_stage_detail,
                         status_code=error.failure_detail.status_code,
@@ -307,7 +313,12 @@ class DeepSeekStructuredQueryAgentTransport:
                 raise
             except (json.JSONDecodeError, ValueError, RuntimeError) as error:
                 last_error = error
-                if attempt == 0:
+                logger.warning(
+                    "DeepSeek query-finalization error attempt=%d/3 error=%s",
+                    attempt + 1,
+                    str(error)[:200],
+                )
+                if attempt < 2:
                     messages = self._repair_finalization_messages_for(
                         request=request,
                         compact_observations=compact_observations,
@@ -316,7 +327,7 @@ class DeepSeekStructuredQueryAgentTransport:
                     )
                     continue
                 raise RuntimeError(
-                    f"DeepSeek query-finalization response could not be repaired after one retry: {error}"
+                    f"DeepSeek query-finalization response could not be repaired after 2 retries: {error}"
                 ) from error
         if last_error is not None:
             raise RuntimeError(f"DeepSeek query-finalization response could not be parsed: {last_error}") from last_error
@@ -643,6 +654,9 @@ class DeepSeekStructuredQueryAgentTransport:
             "For greetings, acknowledgements, capability questions, or other low-context conversational turns, prefer final_answer immediately. "
             "Default final_answer language is Chinese; use English only if the user explicitly asks for English. "
             "When recent conversation context is provided, use it to resolve follow-up references such as 'this paper', 'it', or 'the previous result'. "
+            "CRITICAL: When the user asks about specific content in a paper — methods, models, datasets, experiments, results, formulas, or any factual detail — you MUST use search_source_chunks or read_source_passages to verify from the original text before answering. "
+            "Never guess or fabricate paper content. If you are not certain about a specific detail, search and read the source first. "
+            "Memory summaries may be incomplete or imprecise; only source passages are authoritative for factual claims. "
             "Do not call retrieval tools just to be safe when there is no clear need. "
             "Never invent tools outside allowed_tools. "
             + (
@@ -672,7 +686,7 @@ class DeepSeekStructuredQueryAgentTransport:
                     "Do not include session_id or other runtime-owned ids unless the tool explicitly asks for that business id, such as paper_id. "
                     "Default final_answer language is Chinese unless the user explicitly asks for another language. "
                     "If recent conversation context is present, use it to resolve follow-up references like 'this paper' or 'it'. "
-                    "If the query can already be answered well without more evidence, choose final_answer. "
+                    "If the query asks about specific paper content (methods, models, datasets, results, formulas, experiments), you must first use search_source_chunks or read_source_passages to get the original text. Do not answer from memory alone. "
                     "If the turn is ordinary conversation and not a research retrieval request, choose final_answer. "
                     "Output valid json and follow one of the example JSON shapes exactly."
                 ),
@@ -734,8 +748,12 @@ class DeepSeekStructuredQueryAgentTransport:
                     raw_response_preview=body_text[:800],
                 ),
             )
+        extracted = self._extract_json_from_content(content)
+        if extracted is not None and extracted is not content:
+            logger.info("Extracted JSON from model content (original %d chars, extracted %d chars)", len(content), len(extracted))
+        parse_target = extracted if extracted is not None else content
         try:
-            content_payload = json.loads(content)
+            content_payload = json.loads(parse_target)
         except json.JSONDecodeError as error:
             raise DeepSeekQueryAgentResponseError(
                 "DeepSeek query-agent response content was not valid JSON.",
@@ -830,6 +848,34 @@ class DeepSeekStructuredQueryAgentTransport:
         reasoning_content = self._optional_string(message.get("reasoning_content"))
         if reasoning_content:
             return reasoning_content
+        return None
+
+    @staticmethod
+    def _extract_json_from_content(content: str) -> str | None:
+        """Try to extract a JSON object from model content that may contain markdown or prose."""
+        stripped = content.strip()
+        # Strip markdown code block: ```json ... ``` or ``` ... ```
+        if stripped.startswith("```"):
+            first_newline = stripped.find("\n")
+            if first_newline != -1:
+                inner = stripped[first_newline + 1:]
+                if inner.rstrip().endswith("```"):
+                    inner = inner.rstrip()[:-3].rstrip()
+                try:
+                    json.loads(inner)
+                    return inner
+                except (json.JSONDecodeError, ValueError):
+                    stripped = inner
+        # Find first { to last }
+        first_brace = stripped.find("{")
+        last_brace = stripped.rfind("}")
+        if first_brace != -1 and last_brace > first_brace:
+            candidate = stripped[first_brace:last_brace + 1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except (json.JSONDecodeError, ValueError):
+                pass
         return None
 
     def _log_raw_response(

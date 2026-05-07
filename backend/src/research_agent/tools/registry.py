@@ -241,13 +241,15 @@ class InternalToolRegistry:
         query: str,
         related_paper_ids: list[str] | tuple[str, ...] | None,
         top_k: int,
+        paper_id: str | None = None,
     ) -> SourceRereadResult:
         """Retrieve candidate chunks for a source reread."""
 
+        effective_paper_ids = [paper_id] if paper_id else related_paper_ids
         return self._retrieval_service.retrieve_source_passages(
             session_id=session_id,
             query=query,
-            related_paper_ids=related_paper_ids,
+            related_paper_ids=effective_paper_ids,
             top_k=top_k,
         )
 
@@ -274,6 +276,7 @@ class InternalToolRegistry:
         query: str,
         related_paper_ids: list[str] | tuple[str, ...] | None,
         top_k: int,
+        paper_id: str | None = None,
     ) -> ChunkRerankResult:
         """Select the final source passages from stored chunks."""
 
@@ -282,6 +285,7 @@ class InternalToolRegistry:
             query=query,
             related_paper_ids=related_paper_ids,
             top_k=max(top_k, 10),
+            paper_id=paper_id,
         )
         return self._context_rerank_service.rerank_chunks(query=query, candidates=candidates.chunks, top_k=top_k)
 

@@ -345,12 +345,14 @@ class QueryExecutionService:
 
             if decision.action_type == "tool_call" and decision.tool_name is QueryToolName.SEARCH_SOURCE_CHUNKS:
                 planner_metadata["search_source_chunks"] = self._planner_payload(decision, allowed_tools, turn_index=turn_index)
+                model_paper_id = self._decision_parameter(decision, "paper_id", None)
                 source_search_execution = self._query_tool_executor.execute_with_raw(
                     ToolRequest(
                         tool_name=QueryToolName.SEARCH_SOURCE_CHUNKS,
                         parameters={
                             "session_id": session_id,
                             "query": query,
+                            "paper_id": model_paper_id,
                             "related_paper_ids": list(related_paper_ids) or None,
                             "top_k": CONTEXT_CANDIDATE_TOP_K,
                         },
@@ -534,12 +536,14 @@ class QueryExecutionService:
 
             if decision.action_type == "tool_call" and decision.tool_name is QueryToolName.READ_SOURCE_PASSAGES:
                 planner_metadata["reread_source_passages"] = self._planner_payload(decision, allowed_tools, turn_index=turn_index)
+                model_paper_id = self._decision_parameter(decision, "paper_id", None)
                 source_execution = self._query_tool_executor.execute_with_raw(
                     ToolRequest(
                         tool_name=QueryToolName.READ_SOURCE_PASSAGES,
                         parameters={
                             "session_id": session_id,
                             "query": query,
+                            "paper_id": model_paper_id,
                             "related_paper_ids": list(plan.related_paper_ids),
                             "top_k": CONTEXT_RERANK_TOP_K,
                         },

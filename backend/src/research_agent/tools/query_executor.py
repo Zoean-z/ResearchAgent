@@ -95,6 +95,7 @@ class QueryToolExecutor:
                     query=params.query,
                     related_paper_ids=params.related_paper_ids,
                     top_k=params.top_k,
+                    paper_id=params.paper_id,
                 )
                 output = self._chunk_search_output(raw_result)
             elif request.tool_name is QueryToolName.LIST_RECENT_MESSAGES:
@@ -123,6 +124,7 @@ class QueryToolExecutor:
                     query=params.query,
                     related_paper_ids=params.related_paper_ids,
                     top_k=params.top_k,
+                    paper_id=params.paper_id,
                 )
                 output = self._read_source_output(raw_result, params.query)
             elif request.tool_name is QueryToolName.LIST_SESSION_PAPERS:

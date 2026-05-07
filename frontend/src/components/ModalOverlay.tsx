@@ -33,7 +33,7 @@ export function ModalOverlay({ title, onClose, closeLabel, children }: ModalOver
       <section className="modal-overlay__panel" role="dialog" aria-modal="true" aria-label={title}>
         <header className="modal-overlay__header">
           <strong>{title}</strong>
-          <button className="icon-button" type="button" onClick={onClose} title={closeLabel} aria-label={closeLabel}>
+          <button className="modal-close-button" type="button" onClick={onClose} title={closeLabel} aria-label={closeLabel}>
             <X size={16} />
           </button>
         </header>
