@@ -86,17 +86,21 @@ class DeletionService:
         )
 
     def delete_memory(self, session_id: str, memory_kind: str, memory_id: str) -> DeleteMemoryResult:
-        """Delete a single memory item from the session's visible memory set."""
+        """Delete a single memory item by id.
+
+        The memory is located by id directly so that global memories
+        (belonging to papers outside the current session) can also be deleted.
+        """
 
         self._require_session(session_id)
         if memory_kind == "paper_memory":
-            memory = self._find_paper_memory(session_id, memory_id)
+            memory = self._find_paper_memory_by_id(memory_id)
             deleted = self._memory_repository.delete_paper_memory(memory_id)
         elif memory_kind == "relation_memory":
-            memory = self._find_relation_memory(session_id, memory_id)
+            memory = self._find_relation_memory_by_id(memory_id)
             deleted = self._memory_repository.delete_relation_memory(memory_id)
         elif memory_kind == "open_question_memory":
-            memory = self._find_open_question_memory(session_id, memory_id)
+            memory = self._find_open_question_memory_by_id(memory_id)
             deleted = self._memory_repository.delete_open_question_memory(memory_id)
         else:
             raise ValueError(f"Unsupported memory kind: {memory_kind}")
@@ -133,6 +137,24 @@ class DeletionService:
             (item for item in self._memory_repository.list_open_question_memories_for_papers(paper_ids) if item.id == memory_id),
             None,
         )
+        if memory is None:
+            raise EntityNotFoundError("OpenQuestionMemory", memory_id)
+        return memory
+
+    def _find_paper_memory_by_id(self, memory_id: str) -> PaperMemory:
+        memory = next((item for item in self._memory_repository.list_all_paper_memories() if item.id == memory_id), None)
+        if memory is None:
+            raise EntityNotFoundError("PaperMemory", memory_id)
+        return memory
+
+    def _find_relation_memory_by_id(self, memory_id: str) -> RelationMemory:
+        memory = next((item for item in self._memory_repository.list_all_relation_memories() if item.id == memory_id), None)
+        if memory is None:
+            raise EntityNotFoundError("RelationMemory", memory_id)
+        return memory
+
+    def _find_open_question_memory_by_id(self, memory_id: str) -> OpenQuestionMemory:
+        memory = next((item for item in self._memory_repository.list_all_open_question_memories() if item.id == memory_id), None)
         if memory is None:
             raise EntityNotFoundError("OpenQuestionMemory", memory_id)
         return memory
