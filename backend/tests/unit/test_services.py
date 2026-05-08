@@ -4237,3 +4237,99 @@ def test_timeline_query_service_can_filter_events_by_run() -> None:
 
     assert len(events) == 1
     assert events[0].summary == "A"
+
+
+def test_memory_content_shapes_query_answer() -> None:
+    """Demonstrate that stored memory content influences the model's answer."""
+
+    class MemoryAwareAgent:
+        """Agent that inspects memory observations and uses them in its answer."""
+
+        def __init__(self) -> None:
+            self.requests: list[AgentTurnRequest] = []
+            self._agent_name = "memory_aware_agent"
+
+        def decide_turn(self, request: AgentTurnRequest) -> AgentTurnDecision | None:
+            self.requests.append(request)
+            observed_kinds = {obs.kind for obs in request.observations}
+            # Step 1: search session memory
+            if "memory_search" not in observed_kinds:
+                return AgentTurnDecision(
+                    action_type=AgentActionType.TOOL_CALL,
+                    tool_name="search_session_memory",
+                    rationale="check_session_memory",
+                )
+            # Step 2: answer based on memory content
+            memory_obs = next(obs for obs in request.observations if obs.kind == "memory_search")
+            memories = memory_obs.payload.get("memories", [])
+            if memories:
+                summary = memories[0].get("summary", "")
+                return AgentTurnDecision(
+                    action_type=AgentActionType.FINAL_ANSWER,
+                    final_answer=f"根据记忆，{summary}",
+                    rationale="answer_from_memory",
+                    stop_reason=AgentStopReason.FINAL_ANSWER_READY,
+                )
+            return AgentTurnDecision(
+                action_type=AgentActionType.FINAL_ANSWER,
+                final_answer="没有找到相关记忆。",
+                rationale="no_memory",
+                stop_reason=AgentStopReason.FINAL_ANSWER_READY,
+            )
+
+    session_repository = InMemorySessionRepository()
+    message_repository = InMemoryMessageRepository()
+    memory_repository = InMemoryMemoryRepository()
+    chunk_repository = InMemoryChunkRepository()
+    trace_repository = InMemoryTraceRepository()
+    timeline_repository = InMemoryTimelineRepository()
+    session = session_repository.save(SessionService(session_repository=session_repository).create_session("Memory Test"))
+    session_repository.save_document(
+        SessionDocument(session_id=session.id, paper_id="paper-1", source_type=SourceType.PDF, artifact_id="artifact-1")
+    )
+    memory_repository.upsert_paper_memory(
+        PaperMemory(
+            id="pm-1",
+            paper_id="paper-1",
+            problem="Transformer self-attention has O(n^2) complexity",
+            method="Linear attention with random feature maps reduces to O(n)",
+            key_results=["10x faster inference on long sequences", "Comparable accuracy on GLUE benchmark"],
+            limitations=["Slight degradation on copying tasks"],
+            novelty_claim="First practical linear attention for production LLMs",
+            source_refs=[],
+            confidence=ConfidenceScore(value=0.9),
+        )
+    )
+    task_run_service = TaskRunService(
+        session_repository=session_repository,
+        message_repository=message_repository,
+        trace_repository=trace_repository,
+    )
+    accepted = task_run_service.accept_followup_query(session.id, "这篇论文的方法是什么？")
+    task_run_service.mark_running(session.id, accepted.task_run.id)
+    retrieval_service = RetrievalService(
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+    )
+    agent = MemoryAwareAgent()
+    execution_service = QueryExecutionService(
+        message_repository=message_repository,
+        retrieval_service=retrieval_service,
+        context_rerank_service=ContextRerankService(),
+        trace_repository=trace_repository,
+        timeline_repository=timeline_repository,
+        query_agent_client=agent,
+    )
+
+    result = execution_service.execute_query_run(session.id, accepted.task_run.id)
+
+    # The answer should contain content from the PaperMemory
+    assert "Linear attention" in result.answer
+    assert "O(n)" in result.answer
+    # The agent should have received memory observations
+    assert len(agent.requests) >= 2
+    memory_obs = [obs for obs in agent.requests[1].observations if obs.kind == "memory_search"]
+    assert len(memory_obs) == 1
+    assert len(memory_obs[0].payload["memories"]) > 0
+    assert memory_obs[0].payload["memories"][0]["confidence"] == 0.9
