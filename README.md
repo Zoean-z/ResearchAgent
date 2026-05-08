@@ -3,7 +3,6 @@
 > 一个论文阅读 Agent —— 模型自主决定是否检索、何时读原文、怎样回答，而非固定管线。
 
 <p align="center">
-  <!-- TODO: 替换为实际的演示 GIF -->
   <img src="docs/demo.gif" width="800" alt="demo" />
 </p>
 
@@ -18,6 +17,10 @@
 - **追问与上下文**：自动注入最近对话上下文，支持追问时不重复检索
 - **可观测性**：每一步的 planner 决策、工具输入输出、记忆引用都有 trace 记录，可追溯
 
+<p align="center">
+  <img src="docs/main.png" width="800" alt="主界面" />
+</p>
+
 ## 和 RAG 的区别
 
 | | RAG | 本项目 |
@@ -26,6 +29,10 @@
 | 检索 | 必须检索，不管需不需要 | 模型判断是否需要检索 |
 | 工具 | 无工具调用 | 模型选择工具，宿主执行 |
 | 上下文 | 检索结果拼接 | 分层上下文：记忆摘要 + 对话历史 + 原文片段 |
+
+<p align="center">
+  <img src="docs/memory.png" width="800" alt="记忆面板" />
+</p>
 
 ## 踩过的坑
 
@@ -93,6 +100,10 @@ npm run build  # 构建后由后端同源服务
 - **LLM**：DeepSeek API
 - **记忆层**：OpenViking（可选，有 Noop fallback）
 
+<p align="center">
+  <img src="docs/setting.png" width="800" alt="设置面板" />
+</p>
+
 ## 项目结构
 
 ```
@@ -110,7 +121,6 @@ scripts/          启动脚本
 > A paper-reading Agent that's NOT RAG — the model decides whether to retrieve, when to read the source, and how to answer, instead of following a fixed pipeline.
 
 <p align="center">
-  <!-- TODO: Replace with actual demo GIF -->
   <img src="docs/demo.gif" width="800" alt="demo" />
 </p>
 
@@ -125,6 +135,10 @@ scripts/          启动脚本
 - **Follow-Up & Context**: Automatically injects recent conversation context so follow-up questions don't require redundant retrieval
 - **Observability**: Every step's planner decision, tool input/output, and memory reference is recorded in trace for full auditability
 
+<p align="center">
+  <img src="docs/main.png" width="800" alt="Main interface" />
+</p>
+
 ## How This Differs from RAG
 
 | | RAG | This Project |
@@ -133,6 +147,10 @@ scripts/          启动脚本
 | Retrieval | Must retrieve, regardless of need | Model decides whether retrieval is needed |
 | Tools | No tool calling | Model selects tools, host executes |
 | Context | Retrieved chunks concatenated | Layered: memory summary + conversation history + source passages |
+
+<p align="center">
+  <img src="docs/memory.png" width="800" alt="Memory panel" />
+</p>
 
 ## Pitfalls & Solutions
 
@@ -199,6 +217,10 @@ Then visit `http://127.0.0.1:8011/`.
 - **Frontend**: React / TypeScript / Vite
 - **LLM**: DeepSeek API
 - **Memory Layer**: OpenViking (optional, with Noop fallback)
+
+<p align="center">
+  <img src="docs/setting.png" width="800" alt="Settings panel" />
+</p>
 
 ## Project Structure
 
