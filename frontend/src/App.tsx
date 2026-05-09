@@ -790,6 +790,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const demoBridge = (globalThis as { __RESEARCH_AGENT_DEMO__?: { subscribe?: (listener: () => void) => () => void } })
+      .__RESEARCH_AGENT_DEMO__;
+    if (!selectedSessionId || !demoBridge?.subscribe) {
+      return;
+    }
+    return demoBridge.subscribe(() => {
+      void refreshSession(selectedSessionId, null);
+    });
+  }, [selectedSessionId]);
+
+  useEffect(() => {
     if (composerState.kind !== "mixed_with_arxiv") {
       setMixedInputMode("query");
     }

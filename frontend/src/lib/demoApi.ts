@@ -10,26 +10,40 @@ import type {
 } from "./types";
 
 const SESSION_ID = "session-demo-memory-routed-agent";
-const RUN_SEARCH_IMPORT = "run-demo-search-import-answer";
-const RUN_MEMORY_FOLLOWUP = "run-demo-memory-followup";
+
+type DemoRunDefinition = {
+  id: string;
+  messageId: string;
+  userVisibleAt: number;
+  assistantVisibleAt: number;
+  stepCount: number;
+  startedAt: string;
+  finishedAt: string;
+};
+
+type DemoTrace = {
+  steps: TraceStep[];
+  narratives: TraceNarrative[];
+};
 
 const sessions: Session[] = [
   {
     id: SESSION_ID,
     title: "Memory-Routed CS Demo",
     created_at: "2026-05-08T10:00:00Z",
-    updated_at: "2026-05-08T10:08:00Z",
+    updated_at: "2026-05-08T10:12:30Z",
     status: "active",
   },
 ];
 
-const messages: Message[] = [
+const allMessages: Message[] = [
   {
     id: "msg-demo-user-1",
     session_id: SESSION_ID,
     role: "user",
     type: "followup_query",
-    content: "先在 arXiv 搜索几篇 computer science 里关于 memory-routed paper agents 的论文，选一篇导入，再总结它的核心贡献。",
+    content:
+      "Search a few computer science papers on arXiv about memory-routed research agents, import one, and summarize its main contribution.",
     created_at: "2026-05-08T10:00:10Z",
     status: "accepted",
   },
@@ -38,7 +52,8 @@ const messages: Message[] = [
     session_id: SESSION_ID,
     role: "assistant",
     type: "followup_query",
-    content: "我先用 search_arxiv 找到几篇相关论文，再显式导入其中一篇。当前 session 已导入 arXiv:2401.12345，对应论文《Memory-Routed Research Agents》。系统下载并解析 PDF，写入论文记忆和开放问题记忆。核心贡献是把“是否检索、何时回读原文”从固定 RAG 流程改成模型驱动决策，同时把结构化研究记忆作为后续问答的首要上下文。",
+    content:
+      "I searched arXiv first, selected arXiv:2401.12345, and imported it through the real ingest path. The paper's main contribution is that it replaces a fixed retrieve-then-generate workflow with model-routed decisions over session memory, global memory, and source rereads, so later answers are shaped by durable research memory instead of always starting from the PDF.",
     created_at: "2026-05-08T10:01:24Z",
     status: "completed",
   },
@@ -47,8 +62,8 @@ const messages: Message[] = [
     session_id: SESSION_ID,
     role: "user",
     type: "followup_query",
-    content: "如果我下一轮继续追问，这些长期记忆会怎么影响回答？",
-    created_at: "2026-05-08T10:06:05Z",
+    content: "If I keep asking follow-up questions, how does long-term memory change the next answer?",
+    created_at: "2026-05-08T10:03:05Z",
     status: "accepted",
   },
   {
@@ -56,340 +71,339 @@ const messages: Message[] = [
     session_id: SESSION_ID,
     role: "assistant",
     type: "followup_query",
-    content: "后续回答会先检索当前 session 的论文记忆和开放问题记忆，再看全局记忆；只有这些记忆不足以覆盖你的问题时，系统才会重新回读原文 chunk。所以你会看到后续决策先被长期记忆改变，而不是每次都从 PDF 重新开始。",
-    created_at: "2026-05-08T10:06:42Z",
+    content:
+      "The next answer starts from the session memory written during import, then checks related global memory, and only rereads source chunks when those memories are not enough. That means the agent's later decisions are visibly memory-first instead of PDF-first.",
+    created_at: "2026-05-08T10:03:42Z",
+    status: "completed",
+  },
+  {
+    id: "msg-demo-user-3",
+    session_id: SESSION_ID,
+    role: "user",
+    type: "followup_query",
+    content: "Now compare this agent with a standard RAG workflow in one short paragraph.",
+    created_at: "2026-05-08T10:06:10Z",
+    status: "accepted",
+  },
+  {
+    id: "msg-demo-assistant-3",
+    session_id: SESSION_ID,
+    role: "assistant",
+    type: "followup_query",
+    content:
+      "A standard RAG system usually forces every question through the same retrieval pipeline. This agent does not. It can answer directly, search session memory, search global memory, or reread source passages depending on what the model thinks is necessary, and the trace shows which choice was made and why.",
+    created_at: "2026-05-08T10:06:34Z",
+    status: "completed",
+  },
+  {
+    id: "msg-demo-user-4",
+    session_id: SESSION_ID,
+    role: "user",
+    type: "followup_query",
+    content: "What exactly gets stored in long-term memory after import?",
+    created_at: "2026-05-08T10:09:15Z",
+    status: "accepted",
+  },
+  {
+    id: "msg-demo-assistant-4",
+    session_id: SESSION_ID,
+    role: "assistant",
+    type: "followup_query",
+    content:
+      "The long-term layer stores structured paper memory, open questions, and the source chunks that support them. In this demo you can also see a related global paper memory, which lets future sessions reuse a stable lesson without re-importing the same paper each time.",
+    created_at: "2026-05-08T10:09:44Z",
     status: "completed",
   },
 ];
 
-const runs: TaskRun[] = [
+const runDefinitions: DemoRunDefinition[] = [
   {
-    id: RUN_SEARCH_IMPORT,
-    session_id: SESSION_ID,
-    message_id: "msg-demo-user-1",
-    status: "finished",
-    step_count: 5,
-    started_at: "2026-05-08T10:00:11Z",
-    finished_at: "2026-05-08T10:01:23Z",
-    finish_reason: "completed",
+    id: "run-demo-search-import-answer",
+    messageId: "msg-demo-user-1",
+    userVisibleAt: 1,
+    assistantVisibleAt: 2,
+    stepCount: 5,
+    startedAt: "2026-05-08T10:00:11Z",
+    finishedAt: "2026-05-08T10:01:23Z",
   },
   {
-    id: RUN_MEMORY_FOLLOWUP,
-    session_id: SESSION_ID,
-    message_id: "msg-demo-user-2",
-    status: "finished",
-    step_count: 4,
-    started_at: "2026-05-08T10:06:06Z",
-    finished_at: "2026-05-08T10:06:41Z",
-    finish_reason: "completed",
-  },
-];
-
-const timeline: TimelineEvent[] = [
-  {
-    id: "evt-1",
-    session_id: SESSION_ID,
-    run_id: RUN_SEARCH_IMPORT,
-    event_type: "run_started",
-    summary: "问答已开始：先搜索候选论文，再决定是否导入。",
-    related_memory_ids: [],
-    related_paper_ids: [],
-    created_at: "2026-05-08T10:00:11Z",
+    id: "run-demo-memory-followup",
+    messageId: "msg-demo-user-2",
+    userVisibleAt: 3,
+    assistantVisibleAt: 4,
+    stepCount: 4,
+    startedAt: "2026-05-08T10:03:06Z",
+    finishedAt: "2026-05-08T10:03:41Z",
   },
   {
-    id: "evt-2",
-    session_id: SESSION_ID,
-    run_id: RUN_SEARCH_IMPORT,
-    event_type: "step_completed",
-    summary: "search_arxiv 返回 3 篇候选论文。",
-    related_memory_ids: [],
-    related_paper_ids: [],
-    created_at: "2026-05-08T10:00:26Z",
+    id: "run-demo-rag-comparison",
+    messageId: "msg-demo-user-3",
+    userVisibleAt: 5,
+    assistantVisibleAt: 6,
+    stepCount: 4,
+    startedAt: "2026-05-08T10:06:11Z",
+    finishedAt: "2026-05-08T10:06:33Z",
   },
   {
-    id: "evt-3",
-    session_id: SESSION_ID,
-    run_id: RUN_SEARCH_IMPORT,
-    event_type: "step_completed",
-    summary: "import_arxiv_paper 导入 arXiv:2401.12345 并触发 ingest run。",
-    related_memory_ids: [],
-    related_paper_ids: ["paper:arxiv:2401.12345"],
-    created_at: "2026-05-08T10:00:57Z",
-  },
-  {
-    id: "evt-4",
-    session_id: SESSION_ID,
-    run_id: RUN_SEARCH_IMPORT,
-    event_type: "step_completed",
-    summary: "会话记忆检索命中新导入论文的 paper_memory 与 open_question_memory。",
-    related_memory_ids: ["memory-paper-2401", "memory-open-2401"],
-    related_paper_ids: ["paper:arxiv:2401.12345"],
-    created_at: "2026-05-08T10:01:08Z",
-  },
-  {
-    id: "evt-5",
-    session_id: SESSION_ID,
-    run_id: RUN_SEARCH_IMPORT,
-    event_type: "assistant_message_committed",
-    summary: "助手消息已写入，会话中保留导入摘要与研究结论。",
-    related_memory_ids: ["memory-paper-2401", "memory-open-2401"],
-    related_paper_ids: ["paper:arxiv:2401.12345"],
-    created_at: "2026-05-08T10:01:23Z",
-  },
-  {
-    id: "evt-6",
-    session_id: SESSION_ID,
-    run_id: RUN_MEMORY_FOLLOWUP,
-    event_type: "run_started",
-    summary: "追问开始：优先检索 session 与 global memory。",
-    related_memory_ids: [],
-    related_paper_ids: ["paper:arxiv:2401.12345"],
-    created_at: "2026-05-08T10:06:06Z",
-  },
-  {
-    id: "evt-7",
-    session_id: SESSION_ID,
-    run_id: RUN_MEMORY_FOLLOWUP,
-    event_type: "step_completed",
-    summary: "记忆足以回答，无需回读 PDF 原文。",
-    related_memory_ids: ["memory-paper-2401", "memory-global-1"],
-    related_paper_ids: ["paper:arxiv:2401.12345"],
-    created_at: "2026-05-08T10:06:28Z",
-  },
-  {
-    id: "evt-8",
-    session_id: SESSION_ID,
-    run_id: RUN_MEMORY_FOLLOWUP,
-    event_type: "run_finished",
-    summary: "问答完成，最终回答明确说明了长期记忆如何影响后续决策。",
-    related_memory_ids: ["memory-paper-2401", "memory-open-2401", "memory-global-1"],
-    related_paper_ids: ["paper:arxiv:2401.12345"],
-    created_at: "2026-05-08T10:06:41Z",
+    id: "run-demo-memory-snapshot",
+    messageId: "msg-demo-user-4",
+    userVisibleAt: 7,
+    assistantVisibleAt: 8,
+    stepCount: 3,
+    startedAt: "2026-05-08T10:09:16Z",
+    finishedAt: "2026-05-08T10:09:43Z",
   },
 ];
 
-const traces: Record<string, { steps: TraceStep[]; narratives: TraceNarrative[] }> = {
-  [RUN_SEARCH_IMPORT]: {
+const fullTraces: Record<string, DemoTrace> = {
+  "run-demo-search-import-answer": {
     steps: [
-      {
-        id: "trace-search-1",
-        run_id: RUN_SEARCH_IMPORT,
-        action: "search_arxiv",
-        input_payload: {
-          planner_decision: {
-            selected_tool: "search_arxiv",
-            rationale: "用户先要求搜索几篇候选论文，再决定导入。",
-            fallback_used: false,
-          },
-          query: "computer science memory-routed paper agents",
-          category: "cs",
-        },
-        result_payload: {
-          success: true,
-          query: "all:computer science memory-routed paper agents AND cat:cs",
-          count: 3,
-          papers: [
-            { arxiv_id: "2401.12345", title: "Memory-Routed Research Agents" },
-            { arxiv_id: "2402.23456", title: "Adaptive Retrieval for Paper Agents" },
-            { arxiv_id: "2403.34567", title: "Session Memory for Scientific QA" },
-          ],
-        },
-        status: "completed",
-        started_at: "2026-05-08T10:00:12Z",
-        finished_at: "2026-05-08T10:00:26Z",
-      },
-      {
-        id: "trace-search-2",
-        run_id: RUN_SEARCH_IMPORT,
-        action: "import_arxiv_paper",
-        input_payload: {
-          planner_decision: {
-            selected_tool: "import_arxiv_paper",
-            rationale: "选取最贴近研究问题的一篇论文进入当前 session。",
-            fallback_used: false,
-          },
-          arxiv_id_or_url: "2401.12345",
-        },
-        result_payload: {
-          success: true,
-          arxiv_id: "2401.12345",
-          paper_id: "paper:arxiv:2401.12345",
-          artifact_id: "artifact-arxiv-2401",
-          chunk_count: 42,
-          ingest_summary: "导入完成，已写入论文记忆与开放问题记忆。",
-        },
-        status: "completed",
-        started_at: "2026-05-08T10:00:27Z",
-        finished_at: "2026-05-08T10:00:57Z",
-      },
-      {
-        id: "trace-search-3",
-        run_id: RUN_SEARCH_IMPORT,
-        action: "retrieve_session_memories",
-        input_payload: {
-          planner_decision: {
-            selected_tool: "retrieve_session_memories",
-            rationale: "导入之后先看这篇论文已经写下了哪些结构化记忆。",
-            fallback_used: false,
-          },
-        },
-        result_payload: {
-          memory_ids: ["memory-paper-2401", "memory-open-2401"],
-          coverage_score: 0.91,
-          matched_query_terms: ["memory-routed", "agent", "decision"],
-        },
-        status: "completed",
-        started_at: "2026-05-08T10:00:58Z",
-        finished_at: "2026-05-08T10:01:08Z",
-      },
-      {
-        id: "trace-search-4",
-        run_id: RUN_SEARCH_IMPORT,
-        action: "rerank_context_candidates",
-        input_payload: {
-          planner_decision: {
-            selected_tool: "rerank_context_candidates",
-            rationale: "优先用刚导入论文的 paper_memory，再补 open question。",
-            fallback_used: false,
-          },
-        },
-        result_payload: {
-          selected_memory_ids: ["memory-paper-2401", "memory-open-2401"],
-          selection_source: "session_memory_first",
+      buildStep("trace-search-1", "run-demo-search-import-answer", "search_arxiv", {
+        planner_decision: {
+          selected_tool: "search_arxiv",
+          rationale: "Search candidate papers before importing one into the current session.",
           fallback_used: false,
         },
-        status: "completed",
-        started_at: "2026-05-08T10:01:09Z",
-        finished_at: "2026-05-08T10:01:15Z",
-      },
-      {
-        id: "trace-search-5",
-        run_id: RUN_SEARCH_IMPORT,
-        action: "compose_mock_answer",
-        input_payload: {
-          planner_decision: {
-            selected_tool: "compose_mock_answer",
-            rationale: "已有论文记忆足够回答核心贡献，无需再回读 PDF chunk。",
-            fallback_used: false,
-          },
+        query: "computer science memory-routed research agents",
+        category: "cs",
+      }, {
+        success: true,
+        query: "all:computer science memory-routed research agents AND cat:cs",
+        count: 3,
+        papers: [
+          { arxiv_id: "2401.12345", title: "Memory-Routed Research Agents" },
+          { arxiv_id: "2402.23456", title: "Adaptive Retrieval for Paper Agents" },
+          { arxiv_id: "2403.34567", title: "Session Memory for Scientific QA" },
+        ],
+      }, "2026-05-08T10:00:12Z", "2026-05-08T10:00:26Z"),
+      buildStep("trace-search-2", "run-demo-search-import-answer", "import_arxiv_paper", {
+        planner_decision: {
+          selected_tool: "import_arxiv_paper",
+          rationale: "Import the most relevant candidate through the existing arXiv ingest run.",
+          fallback_used: false,
         },
-        result_payload: {
-          answer_preview: "模型先搜索 arXiv，再导入一篇最相关论文，并基于新写入的论文记忆总结核心贡献。",
-          memory_citations: [
-            { memory_id: "memory-paper-2401" },
-            { memory_id: "memory-open-2401" },
-          ],
-          source_reread_chunks: [],
+        arxiv_id_or_url: "2401.12345",
+      }, {
+        success: true,
+        arxiv_id: "2401.12345",
+        paper_id: "paper:arxiv:2401.12345",
+        artifact_id: "artifact-arxiv-2401",
+        chunk_count: 42,
+        ingest_summary: "Import completed and the paper memory plus open questions were written.",
+      }, "2026-05-08T10:00:27Z", "2026-05-08T10:00:57Z"),
+      buildStep("trace-search-3", "run-demo-search-import-answer", "retrieve_session_memories", {
+        planner_decision: {
+          selected_tool: "retrieve_session_memories",
+          rationale: "Use the newly written session memories before rereading the source.",
+          fallback_used: false,
         },
-        status: "completed",
-        started_at: "2026-05-08T10:01:16Z",
-        finished_at: "2026-05-08T10:01:23Z",
-      },
+      }, {
+        memory_ids: ["memory-paper-2401", "memory-open-2401"],
+        coverage_score: 0.91,
+        matched_query_terms: ["memory-routed", "agent", "decision"],
+      }, "2026-05-08T10:00:58Z", "2026-05-08T10:01:08Z"),
+      buildStep("trace-search-4", "run-demo-search-import-answer", "rerank_context_candidates", {
+        planner_decision: {
+          selected_tool: "rerank_context_candidates",
+          rationale: "Promote the imported paper memory and keep the open question as a secondary signal.",
+          fallback_used: false,
+        },
+      }, {
+        selected_memory_ids: ["memory-paper-2401", "memory-open-2401"],
+        selection_source: "session_memory_first",
+        fallback_used: false,
+      }, "2026-05-08T10:01:09Z", "2026-05-08T10:01:15Z"),
+      buildStep("trace-search-5", "run-demo-search-import-answer", "compose_mock_answer", {
+        planner_decision: {
+          selected_tool: "compose_mock_answer",
+          rationale: "The paper memory is already sufficient to summarize the main contribution.",
+          fallback_used: false,
+        },
+      }, {
+        answer_preview:
+          "The agent searched arXiv, imported one paper, and used newly written memory to summarize the contribution.",
+        memory_citations: [{ memory_id: "memory-paper-2401" }, { memory_id: "memory-open-2401" }],
+        source_reread_chunks: [],
+      }, "2026-05-08T10:01:16Z", "2026-05-08T10:01:23Z"),
     ],
     narratives: [
       {
         trace_step_id: "trace-search-1",
-        reason_text: "先拓展候选论文范围，避免只凭先验挑论文。",
-        impact_text: "后续导入动作来自真实搜索结果，而不是硬编码 ID。",
+        reason_text: "The agent broadens the candidate set before committing to an import.",
+        impact_text: "Import selection is grounded in search output instead of a hardcoded paper id.",
       },
       {
         trace_step_id: "trace-search-2",
-        reason_text: "导入沿用现有 ingest run，因此会触发真正的 PDF 下载、解析、记忆写入和摘要生成。",
-        impact_text: "这一步把候选论文变成当前 session 可检索的长期记忆。",
+        reason_text: "Import reuses the existing ingest chain rather than inventing a separate PDF path.",
+        impact_text: "The imported paper becomes durable session memory that can influence later answers.",
       },
     ],
   },
-  [RUN_MEMORY_FOLLOWUP]: {
+  "run-demo-memory-followup": {
     steps: [
-      {
-        id: "trace-follow-1",
-        run_id: RUN_MEMORY_FOLLOWUP,
-        action: "retrieve_session_memories",
-        input_payload: {
-          planner_decision: {
-            selected_tool: "retrieve_session_memories",
-            rationale: "追问直接依赖当前 session 的论文记忆。",
-            fallback_used: false,
-          },
-        },
-        result_payload: {
-          memory_ids: ["memory-paper-2401", "memory-open-2401"],
-          coverage_score: 0.95,
-          matched_query_terms: ["长期记忆", "后续回答", "影响"],
-        },
-        status: "completed",
-        started_at: "2026-05-08T10:06:07Z",
-        finished_at: "2026-05-08T10:06:16Z",
-      },
-      {
-        id: "trace-follow-2",
-        run_id: RUN_MEMORY_FOLLOWUP,
-        action: "retrieve_global_memories",
-        input_payload: {
-          planner_decision: {
-            selected_tool: "retrieve_global_memories",
-            rationale: "补充一条跨论文的全局经验记忆。",
-            fallback_used: false,
-          },
-        },
-        result_payload: {
-          memory_ids: ["memory-global-1"],
-          coverage_score: 0.62,
-          matched_query_terms: ["memory-first", "research qa"],
-        },
-        status: "completed",
-        started_at: "2026-05-08T10:06:17Z",
-        finished_at: "2026-05-08T10:06:23Z",
-      },
-      {
-        id: "trace-follow-3",
-        run_id: RUN_MEMORY_FOLLOWUP,
-        action: "rerank_context_candidates",
-        input_payload: {
-          planner_decision: {
-            selected_tool: "rerank_context_candidates",
-            rationale: "当前问题更像机制解释，不需要回读原文。",
-            fallback_used: false,
-          },
-        },
-        result_payload: {
-          selected_memory_ids: ["memory-paper-2401", "memory-global-1"],
-          selection_source: "session_then_global",
+      buildStep("trace-follow-1", "run-demo-memory-followup", "retrieve_session_memories", {
+        planner_decision: {
+          selected_tool: "retrieve_session_memories",
+          rationale: "Follow-up questions should start from current-session paper memory.",
           fallback_used: false,
         },
-        status: "completed",
-        started_at: "2026-05-08T10:06:24Z",
-        finished_at: "2026-05-08T10:06:28Z",
-      },
-      {
-        id: "trace-follow-4",
-        run_id: RUN_MEMORY_FOLLOWUP,
-        action: "direct_final_answer",
-        input_payload: {
-          retrieval_skipped: true,
-          planner_decision: {
-            selected_tool: "direct_final_answer",
-            rationale: "session 和 global memory 已经足够回答。",
-            fallback_used: false,
-          },
+      }, {
+        memory_ids: ["memory-paper-2401", "memory-open-2401"],
+        coverage_score: 0.95,
+        matched_query_terms: ["long-term memory", "next answer", "follow-up"],
+      }, "2026-05-08T10:03:07Z", "2026-05-08T10:03:16Z"),
+      buildStep("trace-follow-2", "run-demo-memory-followup", "retrieve_global_memories", {
+        planner_decision: {
+          selected_tool: "retrieve_global_memories",
+          rationale: "Add one reusable global lesson before deciding whether the source is needed again.",
+          fallback_used: false,
         },
-        result_payload: {
-          answer_preview: "后续问答会先命中论文记忆和开放问题记忆，只有不足时才会回读原文。",
+      }, {
+        memory_ids: ["memory-global-1"],
+        coverage_score: 0.62,
+        matched_query_terms: ["memory-first", "research qa"],
+      }, "2026-05-08T10:03:17Z", "2026-05-08T10:03:23Z"),
+      buildStep("trace-follow-3", "run-demo-memory-followup", "rerank_context_candidates", {
+        planner_decision: {
+          selected_tool: "rerank_context_candidates",
+          rationale: "This is a mechanism question, so memory should be enough.",
+          fallback_used: false,
         },
-        status: "completed",
-        started_at: "2026-05-08T10:06:29Z",
-        finished_at: "2026-05-08T10:06:41Z",
-      },
+      }, {
+        selected_memory_ids: ["memory-paper-2401", "memory-global-1"],
+        selection_source: "session_then_global",
+        fallback_used: false,
+      }, "2026-05-08T10:03:24Z", "2026-05-08T10:03:28Z"),
+      buildStep("trace-follow-4", "run-demo-memory-followup", "direct_final_answer", {
+        retrieval_skipped: true,
+        planner_decision: {
+          selected_tool: "direct_final_answer",
+          rationale: "Session and global memory already cover the answer.",
+          fallback_used: false,
+        },
+      }, {
+        answer_preview: "Later answers hit paper memory and open questions before any source reread.",
+      }, "2026-05-08T10:03:29Z", "2026-05-08T10:03:41Z"),
     ],
     narratives: [
       {
         trace_step_id: "trace-follow-4",
-        reason_text: "这个问题问的是系统如何决策，不是论文细节，因此记忆已经足够。",
-        impact_text: "你可以直接看到 memory-first 路径如何改变后续行为。",
+        reason_text: "The question asks how the system behaves, not for a detailed paper citation.",
+        impact_text: "The demo makes the memory-first path visible without rereading the PDF.",
+      },
+    ],
+  },
+  "run-demo-rag-comparison": {
+    steps: [
+      buildStep("trace-rag-1", "run-demo-rag-comparison", "retrieve_session_memories", {
+        planner_decision: {
+          selected_tool: "retrieve_session_memories",
+          rationale: "Reuse the imported paper memory for the comparison.",
+          fallback_used: false,
+        },
+      }, {
+        memory_ids: ["memory-paper-2401"],
+        coverage_score: 0.88,
+        matched_query_terms: ["rag", "workflow", "compare"],
+      }, "2026-05-08T10:06:12Z", "2026-05-08T10:06:18Z"),
+      buildStep("trace-rag-2", "run-demo-rag-comparison", "retrieve_global_memories", {
+        planner_decision: {
+          selected_tool: "retrieve_global_memories",
+          rationale: "Add one reusable global principle about memory-first routing.",
+          fallback_used: false,
+        },
+      }, {
+        memory_ids: ["memory-global-1"],
+        coverage_score: 0.57,
+        matched_query_terms: ["memory-first", "retrieval"],
+      }, "2026-05-08T10:06:19Z", "2026-05-08T10:06:23Z"),
+      buildStep("trace-rag-3", "run-demo-rag-comparison", "rerank_context_candidates", {
+        planner_decision: {
+          selected_tool: "rerank_context_candidates",
+          rationale: "The comparison only needs durable memory, not source rereads.",
+          fallback_used: false,
+        },
+      }, {
+        selected_memory_ids: ["memory-paper-2401", "memory-global-1"],
+        selection_source: "comparison_memory_pack",
+        fallback_used: false,
+      }, "2026-05-08T10:06:24Z", "2026-05-08T10:06:27Z"),
+      buildStep("trace-rag-4", "run-demo-rag-comparison", "direct_final_answer", {
+        retrieval_skipped: true,
+        planner_decision: {
+          selected_tool: "direct_final_answer",
+          rationale: "The answer is conceptual and can be formed from memory evidence alone.",
+          fallback_used: false,
+        },
+      }, {
+        answer_preview: "Standard RAG forces retrieval; this agent chooses whether retrieval is needed at all.",
+      }, "2026-05-08T10:06:28Z", "2026-05-08T10:06:33Z"),
+    ],
+    narratives: [
+      {
+        trace_step_id: "trace-rag-4",
+        reason_text: "The comparison is about orchestration policy rather than missing source facts.",
+        impact_text: "The answer can stay short and direct while still reflecting memory-driven decisions.",
+      },
+    ],
+  },
+  "run-demo-memory-snapshot": {
+    steps: [
+      buildStep("trace-snapshot-1", "run-demo-memory-snapshot", "retrieve_session_memories", {
+        planner_decision: {
+          selected_tool: "retrieve_session_memories",
+          rationale: "List what the current session already stored after import.",
+          fallback_used: false,
+        },
+      }, {
+        memory_ids: ["memory-paper-2401", "memory-open-2401"],
+        coverage_score: 0.93,
+        matched_query_terms: ["stored", "long-term memory", "import"],
+      }, "2026-05-08T10:09:17Z", "2026-05-08T10:09:24Z"),
+      buildStep("trace-snapshot-2", "run-demo-memory-snapshot", "retrieve_global_memories", {
+        planner_decision: {
+          selected_tool: "retrieve_global_memories",
+          rationale: "Mention the reusable global memory layer as well.",
+          fallback_used: false,
+        },
+      }, {
+        memory_ids: ["memory-global-1"],
+        coverage_score: 0.44,
+        matched_query_terms: ["global memory", "reusable lesson"],
+      }, "2026-05-08T10:09:25Z", "2026-05-08T10:09:31Z"),
+      buildStep("trace-snapshot-3", "run-demo-memory-snapshot", "direct_final_answer", {
+        retrieval_skipped: true,
+        planner_decision: {
+          selected_tool: "direct_final_answer",
+          rationale: "No source reread is required because the memory inventory is already structured.",
+          fallback_used: false,
+        },
+      }, {
+        answer_preview: "The system stores paper memory, open questions, and supporting source chunks.",
+      }, "2026-05-08T10:09:32Z", "2026-05-08T10:09:43Z"),
+    ],
+    narratives: [
+      {
+        trace_step_id: "trace-snapshot-3",
+        reason_text: "The memory drawer already exposes the stored structures directly.",
+        impact_text: "The reply explains the persistent layer without re-opening the source document.",
       },
     ],
   },
 };
+
+const allTimelineEvents: Array<TimelineEvent & { visibleAt: number }> = [
+  buildEvent("evt-1", "run-demo-search-import-answer", "run_started", "Query started: search candidate papers before import.", 1, [], []),
+  buildEvent("evt-2", "run-demo-search-import-answer", "step_completed", "search_arxiv returned 3 candidate papers.", 2, [], []),
+  buildEvent("evt-3", "run-demo-search-import-answer", "step_completed", "import_arxiv_paper imported arXiv:2401.12345 through the ingest run.", 2, [], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-4", "run-demo-search-import-answer", "assistant_message_committed", "The imported paper is now available as session memory.", 2, ["memory-paper-2401", "memory-open-2401"], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-5", "run-demo-memory-followup", "run_started", "Follow-up started: session memory is checked before source rereads.", 3, [], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-6", "run-demo-memory-followup", "run_finished", "The answer was completed directly from session and global memory.", 4, ["memory-paper-2401", "memory-global-1"], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-7", "run-demo-rag-comparison", "run_started", "Comparison run started: use durable memory to contrast this agent with RAG.", 5, [], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-8", "run-demo-rag-comparison", "run_finished", "The comparison answer was produced without rereading the source.", 6, ["memory-paper-2401", "memory-global-1"], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-9", "run-demo-memory-snapshot", "run_started", "Memory snapshot run started: explain what long-term memory stores.", 7, [], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-10", "run-demo-memory-snapshot", "run_finished", "The memory inventory answer was completed from stored structures.", 8, ["memory-paper-2401", "memory-open-2401", "memory-global-1"], ["paper:arxiv:2401.12345"]),
+];
 
 const sessionMemoryBundles: MemoryBundles = {
   papers: [
@@ -445,14 +459,16 @@ const sessionMemoryBundles: MemoryBundles = {
           paper_id: "paper:arxiv:2401.12345",
           page: 2,
           section: "Introduction",
-          excerpt: "We replace fixed retrieval ladders with model-routed decisions over session memory, global memory, and source reread.",
+          excerpt:
+            "We replace fixed retrieval ladders with model-routed decisions over session memory, global memory, and source reread.",
         },
         {
           chunk_id: "chunk-2401-31",
           paper_id: "paper:arxiv:2401.12345",
           page: 8,
           section: "Limitations",
-          excerpt: "Routing quality may degrade as the session accumulates overlapping summaries and unresolved questions.",
+          excerpt:
+            "Routing quality may degrade as the session accumulates overlapping summaries and unresolved questions.",
         },
       ],
       source_chunk_count: 2,
@@ -524,6 +540,54 @@ const runtimeStatus: RuntimeStatus = {
   openviking_url: null,
 };
 
+const playbackScheduleMs = [700, 2300, 4200, 5800, 7600, 9300, 11100, 12900];
+const listeners = new Set<() => void>();
+let visibleMessageCount = 0;
+let playbackStarted = false;
+
+function buildStep(
+  id: string,
+  runId: string,
+  action: string,
+  inputPayload: Record<string, unknown>,
+  resultPayload: Record<string, unknown>,
+  startedAt: string,
+  finishedAt: string,
+): TraceStep {
+  return {
+    id,
+    run_id: runId,
+    action,
+    input_payload: inputPayload,
+    result_payload: resultPayload,
+    status: "completed",
+    started_at: startedAt,
+    finished_at: finishedAt,
+  };
+}
+
+function buildEvent(
+  id: string,
+  runId: string,
+  eventType: string,
+  summary: string,
+  visibleAt: number,
+  relatedMemoryIds: string[],
+  relatedPaperIds: string[],
+): TimelineEvent & { visibleAt: number } {
+  return {
+    id,
+    session_id: SESSION_ID,
+    run_id: runId,
+    event_type: eventType,
+    summary,
+    related_memory_ids: relatedMemoryIds,
+    related_paper_ids: relatedPaperIds,
+    created_at: new Date(visibleAt * 1000).toISOString(),
+    visibleAt,
+  };
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -534,12 +598,88 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function match(pathname: string, pattern: RegExp): RegExpMatchArray | null {
-  return pathname.match(pattern);
-}
-
 function readOnlyResponse(): Response {
   return jsonResponse({ detail: "Demo is read-only. Use Docker deployment for the live app." }, 405);
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function notify(): void {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+function startPlayback(): void {
+  if (playbackStarted || typeof window === "undefined") {
+    return;
+  }
+  playbackStarted = true;
+  playbackScheduleMs.forEach((delay, index) => {
+    window.setTimeout(() => {
+      visibleMessageCount = Math.max(visibleMessageCount, index + 1);
+      notify();
+    }, delay);
+  });
+}
+
+function getVisibleMessages(): Message[] {
+  return allMessages.slice(0, visibleMessageCount);
+}
+
+function getVisibleRuns(): TaskRun[] {
+  return [...runDefinitions]
+    .filter((run) => visibleMessageCount >= run.userVisibleAt)
+    .map((run) => {
+      const finished = visibleMessageCount >= run.assistantVisibleAt;
+      const progress = Math.max(1, visibleMessageCount - run.userVisibleAt + 1);
+      return {
+        id: run.id,
+        session_id: SESSION_ID,
+        message_id: run.messageId,
+        status: finished ? "finished" : "running",
+        step_count: finished ? run.stepCount : Math.min(run.stepCount - 1, progress),
+        started_at: run.startedAt,
+        finished_at: finished ? run.finishedAt : null,
+        finish_reason: finished ? "completed" : null,
+      };
+    })
+    .sort((left, right) => right.started_at.localeCompare(left.started_at));
+}
+
+function getVisibleTimeline(): TimelineEvent[] {
+  return allTimelineEvents
+    .filter((event) => visibleMessageCount >= event.visibleAt)
+    .map(({ visibleAt: _visibleAt, ...event }) => event)
+    .sort((left, right) => left.created_at.localeCompare(right.created_at));
+}
+
+function getVisibleTrace(runId: string): DemoTrace {
+  const definition = runDefinitions.find((run) => run.id === runId);
+  const trace = fullTraces[runId];
+  if (!definition || !trace) {
+    return { steps: [], narratives: [] };
+  }
+  if (visibleMessageCount >= definition.assistantVisibleAt) {
+    return trace;
+  }
+  if (visibleMessageCount < definition.userVisibleAt) {
+    return { steps: [], narratives: [] };
+  }
+  const visibleStepCount = Math.max(1, Math.min(trace.steps.length - 1, visibleMessageCount - definition.userVisibleAt + 1));
+  return {
+    steps: trace.steps.slice(0, visibleStepCount),
+    narratives: trace.narratives,
+  };
+}
+
+function match(pathname: string, pattern: RegExp): RegExpMatchArray | null {
+  return pathname.match(pattern);
 }
 
 function handleApiRequest(method: string, pathname: string): Response | null {
@@ -551,13 +691,13 @@ function handleApiRequest(method: string, pathname: string): Response | null {
     return jsonResponse({ items: sessions });
   }
   if (pathname === `/api/sessions/${SESSION_ID}/messages`) {
-    return jsonResponse({ items: messages });
+    return jsonResponse({ items: getVisibleMessages() });
   }
   if (pathname === `/api/sessions/${SESSION_ID}/runs`) {
-    return jsonResponse({ items: runs });
+    return jsonResponse({ items: getVisibleRuns() });
   }
   if (pathname === `/api/sessions/${SESSION_ID}/timeline`) {
-    return jsonResponse({ items: timeline });
+    return jsonResponse({ items: getVisibleTimeline() });
   }
   if (pathname === `/api/sessions/${SESSION_ID}/memory-bundles`) {
     return jsonResponse(sessionMemoryBundles);
@@ -571,13 +711,13 @@ function handleApiRequest(method: string, pathname: string): Response | null {
 
   const traceMatch = match(pathname, new RegExp(`^/api/sessions/${SESSION_ID}/runs/([^/]+)/trace$`));
   if (traceMatch) {
-    return jsonResponse(traces[traceMatch[1]] ?? { steps: [], narratives: [] });
+    return jsonResponse(getVisibleTrace(traceMatch[1]));
   }
 
   const eventsMatch = match(pathname, new RegExp(`^/api/sessions/${SESSION_ID}/runs/([^/]+)/events$`));
   if (eventsMatch) {
     return jsonResponse({
-      items: timeline.filter((event) => event.run_id === eventsMatch[1]),
+      items: getVisibleTimeline().filter((event) => event.run_id === eventsMatch[1]),
     });
   }
 
@@ -596,6 +736,12 @@ export function installDemoApi(): void {
   if (typeof window === "undefined") {
     return;
   }
+
+  visibleMessageCount = 0;
+  (globalThis as { __RESEARCH_AGENT_DEMO__?: { subscribe: typeof subscribe } }).__RESEARCH_AGENT_DEMO__ = {
+    subscribe,
+  };
+
   const originalFetch = window.fetch.bind(window);
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = input instanceof Request ? input : null;
@@ -613,4 +759,6 @@ export function installDemoApi(): void {
     }
     return jsonResponse({ detail: "Demo route not found." }, 404);
   };
+
+  startPlayback();
 }
