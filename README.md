@@ -1,246 +1,192 @@
 # Memory-Routed Paper Agent
 
-> 一个论文阅读 Agent —— 模型自主决定是否检索、何时读原文、怎样回答，而非固定管线。
+> 一个面向论文研究场景的 Agent：导入论文后先写入长期记忆，后续问答优先使用记忆，再决定是否回读原文。
 
 <p align="center">
   <img src="docs/demo.gif" width="800" alt="demo" />
 </p>
 
-## Demo & Deployment
+## 这是什么
 
-- Static demo: `https://zoean-z.github.io/ResearchAgent/`
-- Docker one-command run:
+这个项目不是一个“把 PDF 扔进去然后直接问答”的普通论文聊天工具。
+
+它的重点是把论文理解结果沉淀成结构化研究记忆，并且让后续问答过程清楚地体现：
+
+- 先查当前 session 相关记忆
+- 再查可复用的全局记忆
+- 只有记忆不够时才回读原文 chunk
+
+因此，系统价值不只是“能回答”，而是“能看见记忆如何改变后续决策”。
+
+## 为什么它不是普通 RAG
+
+| 对比项 | 标准 RAG | 本项目 |
+|---|---|---|
+| 问答路径 | 基本固定：query -> retrieve -> generate | 由模型决定是否需要检索、是否需要回读原文 |
+| 论文导入 | 常见做法是直接切 chunk 后检索 | 先导入，再提取并持久化结构化研究记忆 |
+| 长期记忆 | 通常较弱或不存在 | 明确支持 `paper_memory`、`relation_memory`、`open_question_memory` |
+| 可观测性 | 多数只展示最终回答 | 前端展示工具调用、思考过程、trace、timeline、memory snapshot |
+
+<p align="center">
+  <img src="docs/main.png" width="800" alt="main interface" />
+</p>
+
+## 当前重点能力
+
+- **论文导入**
+  - 支持直接粘贴 arXiv 链接
+  - 支持上传本地 PDF
+  - 导入后会下载 / 解析 PDF、切 chunk、注册 paper、写入记忆、生成摘要
+
+- **长期记忆优先的问答**
+  - 后续问题先查 session memory
+  - 再查 global memory
+  - 记忆不足时才回读原文
+
+- **模型驱动工具调用**
+  - 模型可以自己决定下一步是检索记忆、搜索 arXiv、导入论文、回读原文还是直接回答
+  - 宿主 runtime 仍然控制生命周期、step limit、trace 和 finish/fail 语义
+
+- **实时可视化**
+  - 前端可以看到 step-by-step 的工具调用
+  - 可以查看 timeline、memory drawer、trace reasoning
+  - 能看到“为什么这一步用了记忆 / 为什么这一步回读了原文”
+
+<p align="center">
+  <img src="docs/memory.png" width="800" alt="memory panel" />
+</p>
+
+## 这次新增的能力
+
+这次更新把“搜索论文 -> 导入论文 -> 基于记忆继续问答”的链路补完整了，同时加入了可直接展示的部署入口。
+
+- **新增 `import_arxiv_paper`**
+  - 这是一个模型可调用的 arXiv 导入工具
+  - 它复用现有 arXiv ingest run 链路，不另外创建一套 PDF URL 导入逻辑
+  - 支持传入 arXiv id、abs URL、pdf URL，并统一规范化到标准 abs URL
+
+- **新增 `search_arxiv`**
+  - 通过官方 arXiv API 搜索论文
+  - 只返回轻量元数据：`arxiv_id`、标题、作者、摘要、分类、abs URL、pdf URL
+  - 不下载 PDF，不触发 ingest
+  - 模型可以先搜索，再显式调用 `import_arxiv_paper`
+
+- **新增 arXiv 失败兜底**
+  - 如果搜索不到、网络失败、下载失败，query runtime 会返回结构化 `no_results`
+  - 不会因为单次 arXiv 搜索/导入失败就把整轮问答直接打崩
+
+- **新增静态 Demo 展示**
+  - 提供 GitHub Pages 可用的静态演示页
+  - 使用真实前端 + mock `/api` 数据
+  - 自动播放多轮消息，展示搜索 arXiv、导入论文、长期记忆影响回答、与 RAG 对比等关键能力
+
+- **新增 Docker 一键部署**
+  - 增加 `Dockerfile` 和 `docker-compose.yml`
+  - 可以直接构建并运行真实前后端
+
+## Demo 与部署
+
+- 静态演示页：
+  - `https://zoean-z.github.io/ResearchAgent/`
+
+- Docker 一键启动：
 
 ```bash
 docker compose up --build
 ```
 
-- Local app after Docker starts: `http://127.0.0.1:8011/`
-- The GitHub Pages demo is read-only and uses the real frontend with mocked `/api` responses.
-- The Docker deployment serves the real frontend and backend together; set `DEEPSEEK_API_KEY` before starting if you want live model calls.
+- 启动后访问：
+  - `http://127.0.0.1:8011/`
 
----
+说明：
 
-## 核心功能
-
-- **论文导入**：粘贴 arXiv 链接或上传本地 PDF，自动解析分块、提取结构化记忆（论文要点、关联知识、开放问题）
-- **模型驱动的工具调用**：模型自主决定下一步动作 —— 搜索记忆、读取原文、直接回答，由宿主循环执行并校验
-- **记忆系统**：基于 OpenViking 的长期记忆，支持论文记忆、关联记忆、开放问题记忆的存储与检索
-- **实时推理流**：前端实时展示模型的思考过程、工具调用、中间结果，而不是等全部跑完才显示
-- **追问与上下文**：自动注入最近对话上下文，支持追问时不重复检索
-- **可观测性**：每一步的 planner 决策、工具输入输出、记忆引用都有 trace 记录，可追溯
-
-<p align="center">
-  <img src="docs/main.png" width="800" alt="主界面" />
-</p>
-
-## 和 RAG 的区别
-
-| | RAG | 本项目 |
-|---|---|---|
-| 流程 | 固定管线：query → retrieve → generate | 模型自主决定：可直接回答，也可多次检索 |
-| 检索 | 必须检索，不管需不需要 | 模型判断是否需要检索 |
-| 工具 | 无工具调用 | 模型选择工具，宿主执行 |
-| 上下文 | 检索结果拼接 | 分层上下文：记忆摘要 + 对话历史 + 原文片段 |
-
-<p align="center">
-  <img src="docs/memory.png" width="800" alt="记忆面板" />
-</p>
-
-## 踩过的坑
-
-### 1. DeepSeek 返回空 body 但 HTTP 200
-
-DeepSeek 限流时不返回标准的 429，而是返回 HTTP 200 + 空 body。
-
-**解法**：在解析响应前先检查 body 是否为空，空则抛出限流异常，触发指数退避重试（5s/10s/15s）。
-
-### 2. 模型返回 markdown 包裹的 JSON
-
-模型有时返回 ` ```json\n{...}\n``` ` 或者先输出一段文字再附上 JSON，直接 `json.loads` 会失败。
-
-**解法**：先尝试去掉 markdown 代码块标记，再用 `{` 和 `}` 的首尾位置提取 JSON 子串，两步容错。
-
-### 3. max_tokens 不够导致 JSON 被截断
-
-模型返回 10 个 chunk UUID + 中文理由时，640 token 不够，JSON 被截断导致解析失败。
-
-**解法**：`choose_next_action` 的 `max_tokens` 从 640 提升到 2048。
-
-### 4. 模型不读原文就编造论文内容
-
-早期 prompt 鼓励"优先不检索直接回答"，导致模型凭记忆摘要编造论文细节。
-
-**解法**：在 prompt 中加入 CRITICAL 指令 —— 回答论文具体内容（方法、模型、数据集、实验结果）时必须先读原文。
-
-### 5. 单文件过大难以维护
-
-`query_execution_service.py` 曾膨胀到 1988 行。
-
-**解法**：拆分为 6 个模块 —— `query_execution_models`、`query_citation_builder`、`query_observation_builder`、`query_answer_composer`、`query_trace_writer` 和瘦身后的主服务。
+- GitHub Pages 上的是只读静态演示，使用真实前端和预制会话数据
+- Docker 启动的是可交互的真实应用
+- 如需真实模型调用，请在启动前配置 `DEEPSEEK_API_KEY`
 
 ## 快速开始
 
-### 后端
+### 方式一：Docker
+
+```bash
+docker compose up --build
+```
+
+这是最适合演示和本地快速试跑的方式。
+
+### 方式二：本地开发
+
+后端：
 
 ```bash
 cd backend
 pip install -e .
-cp .env.example .env  # 填入 DEEPSEEK_API_KEY
-uvicorn research_agent.api.app:app --port 8011
 ```
 
-### 前端
+前端：
 
 ```bash
 cd frontend
 npm install
-npm run build  # 构建后由后端同源服务
+npm run build
 ```
 
-或使用一键脚本（Windows）：
+然后启动后端：
+
+```bash
+uvicorn research_agent.api.app:app --host 0.0.0.0 --port 8011
+```
+
+或者在 Windows 下直接使用脚本：
 
 ```powershell
 .\scripts\start-dev.ps1
 ```
 
-启动后访问 `http://127.0.0.1:8011/`。
+## 运行时技术路径
 
-## 技术栈
+当前系统的主要调用链大致是：
 
-- **后端**：Python / FastAPI / SQLite / Pydantic
-- **前端**：React / TypeScript / Vite
-- **LLM**：DeepSeek API
-- **记忆层**：OpenViking（可选，有 Noop fallback）
-
-<p align="center">
-  <img src="docs/setting.png" width="800" alt="设置面板" />
-</p>
+1. 用户输入问题 / arXiv 链接 / 上传 PDF
+2. 前端或 query runtime 决定是普通问答还是论文导入
+3. 导入路径会解析 PDF、注册论文、写入 chunk 和结构化记忆
+4. 后续问答先使用 session / global memory
+5. 只有记忆不足时才回读 source passages
+6. 结果通过 trace、timeline 和 memory drawer 在前端展示
 
 ## 项目结构
 
+```text
+backend/    FastAPI API、runtime、services、tools、storage adapters
+frontend/   React + TypeScript 工作台前端
+data/       本地 artifacts、SQLite 数据
+docs/       项目说明、接口文档、演示素材
+scripts/    启动与辅助脚本
 ```
-backend/          Python 服务、领域模型、运行时、适配器、API
-frontend/         React 工作台：会话、对话、导入、时间线、记忆
-data/             本地制品和 SQLite 存储
-docs/             项目规格文档
-scripts/          启动脚本
-```
 
----
+## 技术栈
 
-# Memory-Routed Paper Agent
-
-> A paper-reading Agent that's NOT RAG — the model decides whether to retrieve, when to read the source, and how to answer, instead of following a fixed pipeline.
+- Backend: Python / FastAPI / SQLite / Pydantic
+- Frontend: React / TypeScript / Vite
+- LLM: DeepSeek API
+- Memory Layer: OpenViking（可选）+ 本地 SQLite runtime/display store
 
 <p align="center">
-  <img src="docs/demo.gif" width="800" alt="demo" />
+  <img src="docs/setting.png" width="800" alt="settings panel" />
 </p>
 
----
+## 适合展示的点
 
-## Core Features
+如果这是一个求职或项目展示仓库，最值得看的不是“它能不能回答论文问题”，而是下面这几件事：
 
-- **Paper Import**: Paste an arXiv link or upload a local PDF — the system auto-parses, chunks, and extracts structured memories (key points, related knowledge, open questions)
-- **Model-Driven Tool Calling**: The model autonomously decides the next action — search memory, read source passages, or answer directly — with the host loop executing and validating each step
-- **Memory System**: Long-term memory powered by OpenViking, supporting paper memories, relation memories, and open-question memories
-- **Real-Time Reasoning Stream**: The frontend live-displays the model's thinking process, tool calls, and intermediate results instead of waiting for completion
-- **Follow-Up & Context**: Automatically injects recent conversation context so follow-up questions don't require redundant retrieval
-- **Observability**: Every step's planner decision, tool input/output, and memory reference is recorded in trace for full auditability
+- 它把论文导入、长期记忆、追问和可视化 trace 串成了一条完整链路
+- 它不是固定 RAG，而是模型驱动的工具调用和决策
+- 它能展示“长期记忆如何影响下一轮回答”
+- 它既有静态 demo，也有 Docker 一键部署入口
 
-<p align="center">
-  <img src="docs/main.png" width="800" alt="Main interface" />
-</p>
+## 后续可继续扩展的方向
 
-## How This Differs from RAG
-
-| | RAG | This Project |
-|---|---|---|
-| Pipeline | Fixed: query → retrieve → generate | Model-driven: can answer directly or retrieve multiple times |
-| Retrieval | Must retrieve, regardless of need | Model decides whether retrieval is needed |
-| Tools | No tool calling | Model selects tools, host executes |
-| Context | Retrieved chunks concatenated | Layered: memory summary + conversation history + source passages |
-
-<p align="center">
-  <img src="docs/memory.png" width="800" alt="Memory panel" />
-</p>
-
-## Pitfalls & Solutions
-
-### 1. DeepSeek returns empty body with HTTP 200
-
-DeepSeek's rate-limiting doesn't return a standard 429 — instead it returns HTTP 200 with an empty body.
-
-**Fix**: Check for empty body before parsing; raise a rate-limit exception to trigger exponential backoff (5s/10s/15s).
-
-### 2. Model returns markdown-wrapped JSON
-
-The model sometimes returns ` ```json\n{...}\n``` ` or prose followed by JSON, causing `json.loads` to fail.
-
-**Fix**: Strip markdown code block markers first, then extract the JSON substring between the first `{` and last `}` — two-layer fault tolerance.
-
-### 3. max_tokens truncates JSON
-
-When the model returns 10 chunk UUIDs + Chinese rationale, 640 tokens isn't enough — the JSON gets truncated.
-
-**Fix**: Increased `choose_next_action` max_tokens from 640 to 2048.
-
-### 4. Model fabricates paper content without reading source
-
-Early prompts encouraged "prefer answering without retrieval," causing the model to invent paper details from memory summaries.
-
-**Fix**: Added CRITICAL instructions in the prompt — when answering about specific paper content (methods, models, datasets, experiment results), the model MUST read the source first.
-
-### 5. Single file too large to maintain
-
-`query_execution_service.py` once ballooned to 1988 lines.
-
-**Fix**: Split into 6 modules — `query_execution_models`, `query_citation_builder`, `query_observation_builder`, `query_answer_composer`, `query_trace_writer`, and the slimmed-down main service.
-
-## Quick Start
-
-### Backend
-
-```bash
-cd backend
-pip install -e .
-cp .env.example .env  # Add your DEEPSEEK_API_KEY
-uvicorn research_agent.api.app:app --port 8011
-```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run build  # Served by backend as same-origin
-```
-
-Or use the one-click script (Windows):
-
-```powershell
-.\scripts\start-dev.ps1
-```
-
-Then visit `http://127.0.0.1:8011/`.
-
-## Tech Stack
-
-- **Backend**: Python / FastAPI / SQLite / Pydantic
-- **Frontend**: React / TypeScript / Vite
-- **LLM**: DeepSeek API
-- **Memory Layer**: OpenViking (optional, with Noop fallback)
-
-<p align="center">
-  <img src="docs/setting.png" width="800" alt="Settings panel" />
-</p>
-
-## Project Structure
-
-```
-backend/          Python service, domain models, runtime, adapters, API
-frontend/         React workbench: sessions, chat, ingest, timeline, memory
-data/             Local artifacts and SQLite storage
-docs/             Project specification
-scripts/          Startup scripts
-```
+- 更完整的 token 级流式输出
+- 更强的 ingest 质量控制与评估
+- 更丰富的 memory editing / inspection 工具
+- 在不改变核心 runtime 语义的前提下，继续扩展工具面

@@ -29,7 +29,7 @@ type DemoTrace = {
 const sessions: Session[] = [
   {
     id: SESSION_ID,
-    title: "Memory-Routed CS Demo",
+    title: "记忆路由研究 Agent 演示",
     created_at: "2026-05-08T10:00:00Z",
     updated_at: "2026-05-08T10:12:30Z",
     status: "active",
@@ -43,7 +43,7 @@ const allMessages: Message[] = [
     role: "user",
     type: "followup_query",
     content:
-      "Search a few computer science papers on arXiv about memory-routed research agents, import one, and summarize its main contribution.",
+      "先在 arXiv 搜索几篇计算机领域关于记忆路由研究 Agent 的论文，导入其中一篇，再总结它的核心贡献。",
     created_at: "2026-05-08T10:00:10Z",
     status: "accepted",
   },
@@ -53,7 +53,7 @@ const allMessages: Message[] = [
     role: "assistant",
     type: "followup_query",
     content:
-      "I searched arXiv first, selected arXiv:2401.12345, and imported it through the real ingest path. The paper's main contribution is that it replaces a fixed retrieve-then-generate workflow with model-routed decisions over session memory, global memory, and source rereads, so later answers are shaped by durable research memory instead of always starting from the PDF.",
+      "我先搜索了 arXiv，选中了 arXiv:2401.12345，并通过现有 ingest 链路完成导入。这篇论文的核心贡献，是把固定的“检索后生成”流程改成由模型在会话记忆、全局记忆和原文回读之间自主决策，因此后续回答会先受长期研究记忆影响，而不是每次都从 PDF 重新开始。",
     created_at: "2026-05-08T10:01:24Z",
     status: "completed",
   },
@@ -62,7 +62,7 @@ const allMessages: Message[] = [
     session_id: SESSION_ID,
     role: "user",
     type: "followup_query",
-    content: "If I keep asking follow-up questions, how does long-term memory change the next answer?",
+    content: "如果我继续追问，长期记忆会怎样影响下一轮回答？",
     created_at: "2026-05-08T10:03:05Z",
     status: "accepted",
   },
@@ -72,7 +72,7 @@ const allMessages: Message[] = [
     role: "assistant",
     type: "followup_query",
     content:
-      "The next answer starts from the session memory written during import, then checks related global memory, and only rereads source chunks when those memories are not enough. That means the agent's later decisions are visibly memory-first instead of PDF-first.",
+      "下一轮回答会先使用导入时写下的会话记忆，再检查相关的全局记忆，只有这些记忆不足时才会回读原文 chunk。这意味着后续决策会明显体现“记忆优先”，而不是“PDF 优先”。",
     created_at: "2026-05-08T10:03:42Z",
     status: "completed",
   },
@@ -81,7 +81,7 @@ const allMessages: Message[] = [
     session_id: SESSION_ID,
     role: "user",
     type: "followup_query",
-    content: "Now compare this agent with a standard RAG workflow in one short paragraph.",
+    content: "再用一小段话，把这个 Agent 和标准 RAG 工作流做个对比。",
     created_at: "2026-05-08T10:06:10Z",
     status: "accepted",
   },
@@ -91,7 +91,7 @@ const allMessages: Message[] = [
     role: "assistant",
     type: "followup_query",
     content:
-      "A standard RAG system usually forces every question through the same retrieval pipeline. This agent does not. It can answer directly, search session memory, search global memory, or reread source passages depending on what the model thinks is necessary, and the trace shows which choice was made and why.",
+      "标准 RAG 往往要求每个问题都先走同一条检索链路，这个 Agent 不是这样。它可以直接回答，也可以检索会话记忆、检索全局记忆，或者回读原文片段，具体走哪条路径由模型判断是否必要，trace 里还能看到它为什么这么选。",
     created_at: "2026-05-08T10:06:34Z",
     status: "completed",
   },
@@ -100,7 +100,7 @@ const allMessages: Message[] = [
     session_id: SESSION_ID,
     role: "user",
     type: "followup_query",
-    content: "What exactly gets stored in long-term memory after import?",
+    content: "导入之后，长期记忆里具体会存下什么？",
     created_at: "2026-05-08T10:09:15Z",
     status: "accepted",
   },
@@ -110,7 +110,7 @@ const allMessages: Message[] = [
     role: "assistant",
     type: "followup_query",
     content:
-      "The long-term layer stores structured paper memory, open questions, and the source chunks that support them. In this demo you can also see a related global paper memory, which lets future sessions reuse a stable lesson without re-importing the same paper each time.",
+      "长期记忆层会存结构化的论文记忆、开放问题，以及支撑这些记忆的原文 chunk。在这个演示里你还能看到一条相关的全局论文记忆，它让后续会话可以复用稳定结论，而不必每次重新导入同一篇论文。",
     created_at: "2026-05-08T10:09:44Z",
     status: "completed",
   },
@@ -161,7 +161,7 @@ const fullTraces: Record<string, DemoTrace> = {
       buildStep("trace-search-1", "run-demo-search-import-answer", "search_arxiv", {
         planner_decision: {
           selected_tool: "search_arxiv",
-          rationale: "Search candidate papers before importing one into the current session.",
+          rationale: "先搜索候选论文，再决定把哪一篇导入当前会话。",
           fallback_used: false,
         },
         query: "computer science memory-routed research agents",
@@ -189,12 +189,12 @@ const fullTraces: Record<string, DemoTrace> = {
         paper_id: "paper:arxiv:2401.12345",
         artifact_id: "artifact-arxiv-2401",
         chunk_count: 42,
-        ingest_summary: "Import completed and the paper memory plus open questions were written.",
+        ingest_summary: "导入完成，论文记忆和开放问题记忆已经写入。",
       }, "2026-05-08T10:00:27Z", "2026-05-08T10:00:57Z"),
       buildStep("trace-search-3", "run-demo-search-import-answer", "retrieve_session_memories", {
         planner_decision: {
           selected_tool: "retrieve_session_memories",
-          rationale: "Use the newly written session memories before rereading the source.",
+          rationale: "先使用刚写入的会话记忆，再决定是否回读原文。",
           fallback_used: false,
         },
       }, {
@@ -205,7 +205,7 @@ const fullTraces: Record<string, DemoTrace> = {
       buildStep("trace-search-4", "run-demo-search-import-answer", "rerank_context_candidates", {
         planner_decision: {
           selected_tool: "rerank_context_candidates",
-          rationale: "Promote the imported paper memory and keep the open question as a secondary signal.",
+          rationale: "优先使用这篇论文的 paper memory，并保留 open question 作为辅助信号。",
           fallback_used: false,
         },
       }, {
@@ -216,12 +216,12 @@ const fullTraces: Record<string, DemoTrace> = {
       buildStep("trace-search-5", "run-demo-search-import-answer", "compose_mock_answer", {
         planner_decision: {
           selected_tool: "compose_mock_answer",
-          rationale: "The paper memory is already sufficient to summarize the main contribution.",
+          rationale: "现有论文记忆已经足以总结核心贡献。",
           fallback_used: false,
         },
       }, {
         answer_preview:
-          "The agent searched arXiv, imported one paper, and used newly written memory to summarize the contribution.",
+          "Agent 先搜索 arXiv，再导入一篇论文，并用新写入的记忆总结核心贡献。",
         memory_citations: [{ memory_id: "memory-paper-2401" }, { memory_id: "memory-open-2401" }],
         source_reread_chunks: [],
       }, "2026-05-08T10:01:16Z", "2026-05-08T10:01:23Z"),
@@ -229,13 +229,13 @@ const fullTraces: Record<string, DemoTrace> = {
     narratives: [
       {
         trace_step_id: "trace-search-1",
-        reason_text: "The agent broadens the candidate set before committing to an import.",
-        impact_text: "Import selection is grounded in search output instead of a hardcoded paper id.",
+        reason_text: "先扩展候选论文集合，避免在导入前就把目标写死。",
+        impact_text: "导入选择来自真实搜索结果，而不是硬编码的 paper id。",
       },
       {
         trace_step_id: "trace-search-2",
-        reason_text: "Import reuses the existing ingest chain rather than inventing a separate PDF path.",
-        impact_text: "The imported paper becomes durable session memory that can influence later answers.",
+        reason_text: "导入复用了现有 ingest 链路，而不是额外造一条独立的 PDF 路径。",
+        impact_text: "这篇论文会变成可持续影响后续回答的会话记忆。",
       },
     ],
   },
@@ -244,18 +244,18 @@ const fullTraces: Record<string, DemoTrace> = {
       buildStep("trace-follow-1", "run-demo-memory-followup", "retrieve_session_memories", {
         planner_decision: {
           selected_tool: "retrieve_session_memories",
-          rationale: "Follow-up questions should start from current-session paper memory.",
+          rationale: "追问应该先从当前会话的论文记忆开始。",
           fallback_used: false,
         },
       }, {
         memory_ids: ["memory-paper-2401", "memory-open-2401"],
         coverage_score: 0.95,
-        matched_query_terms: ["long-term memory", "next answer", "follow-up"],
+        matched_query_terms: ["长期记忆", "下一轮回答", "追问"],
       }, "2026-05-08T10:03:07Z", "2026-05-08T10:03:16Z"),
       buildStep("trace-follow-2", "run-demo-memory-followup", "retrieve_global_memories", {
         planner_decision: {
           selected_tool: "retrieve_global_memories",
-          rationale: "Add one reusable global lesson before deciding whether the source is needed again.",
+          rationale: "先补充一条可复用的全局经验，再决定是否还需要原文。",
           fallback_used: false,
         },
       }, {
@@ -266,7 +266,7 @@ const fullTraces: Record<string, DemoTrace> = {
       buildStep("trace-follow-3", "run-demo-memory-followup", "rerank_context_candidates", {
         planner_decision: {
           selected_tool: "rerank_context_candidates",
-          rationale: "This is a mechanism question, so memory should be enough.",
+          rationale: "这是机制解释类问题，记忆通常已经足够。",
           fallback_used: false,
         },
       }, {
@@ -278,18 +278,18 @@ const fullTraces: Record<string, DemoTrace> = {
         retrieval_skipped: true,
         planner_decision: {
           selected_tool: "direct_final_answer",
-          rationale: "Session and global memory already cover the answer.",
+          rationale: "会话记忆和全局记忆已经足以覆盖答案。",
           fallback_used: false,
         },
       }, {
-        answer_preview: "Later answers hit paper memory and open questions before any source reread.",
+        answer_preview: "后续回答会先命中论文记忆和开放问题，再考虑是否回读原文。",
       }, "2026-05-08T10:03:29Z", "2026-05-08T10:03:41Z"),
     ],
     narratives: [
       {
         trace_step_id: "trace-follow-4",
-        reason_text: "The question asks how the system behaves, not for a detailed paper citation.",
-        impact_text: "The demo makes the memory-first path visible without rereading the PDF.",
+        reason_text: "这个问题问的是系统如何运作，而不是具体论文细节。",
+        impact_text: "因此不用回读 PDF，也能清楚展示记忆优先路径。",
       },
     ],
   },
@@ -298,7 +298,7 @@ const fullTraces: Record<string, DemoTrace> = {
       buildStep("trace-rag-1", "run-demo-rag-comparison", "retrieve_session_memories", {
         planner_decision: {
           selected_tool: "retrieve_session_memories",
-          rationale: "Reuse the imported paper memory for the comparison.",
+          rationale: "对比时先复用刚导入论文的记忆。",
           fallback_used: false,
         },
       }, {
@@ -309,7 +309,7 @@ const fullTraces: Record<string, DemoTrace> = {
       buildStep("trace-rag-2", "run-demo-rag-comparison", "retrieve_global_memories", {
         planner_decision: {
           selected_tool: "retrieve_global_memories",
-          rationale: "Add one reusable global principle about memory-first routing.",
+          rationale: "再补一条关于记忆优先路由的全局经验。",
           fallback_used: false,
         },
       }, {
@@ -320,7 +320,7 @@ const fullTraces: Record<string, DemoTrace> = {
       buildStep("trace-rag-3", "run-demo-rag-comparison", "rerank_context_candidates", {
         planner_decision: {
           selected_tool: "rerank_context_candidates",
-          rationale: "The comparison only needs durable memory, not source rereads.",
+          rationale: "这个对比只需要长期记忆，不需要回读原文。",
           fallback_used: false,
         },
       }, {
@@ -332,18 +332,18 @@ const fullTraces: Record<string, DemoTrace> = {
         retrieval_skipped: true,
         planner_decision: {
           selected_tool: "direct_final_answer",
-          rationale: "The answer is conceptual and can be formed from memory evidence alone.",
+          rationale: "这是概念性回答，仅靠记忆证据就能完成。",
           fallback_used: false,
         },
       }, {
-        answer_preview: "Standard RAG forces retrieval; this agent chooses whether retrieval is needed at all.",
+        answer_preview: "标准 RAG 默认强制检索；这个 Agent 会先判断是否真的需要检索。",
       }, "2026-05-08T10:06:28Z", "2026-05-08T10:06:33Z"),
     ],
     narratives: [
       {
         trace_step_id: "trace-rag-4",
-        reason_text: "The comparison is about orchestration policy rather than missing source facts.",
-        impact_text: "The answer can stay short and direct while still reflecting memory-driven decisions.",
+        reason_text: "这里比较的是编排策略，而不是缺失的原文事实。",
+        impact_text: "所以回答可以保持简短，同时仍体现记忆驱动决策。",
       },
     ],
   },
@@ -352,7 +352,7 @@ const fullTraces: Record<string, DemoTrace> = {
       buildStep("trace-snapshot-1", "run-demo-memory-snapshot", "retrieve_session_memories", {
         planner_decision: {
           selected_tool: "retrieve_session_memories",
-          rationale: "List what the current session already stored after import.",
+          rationale: "先列出当前会话在导入后已经存下了什么。",
           fallback_used: false,
         },
       }, {
@@ -363,7 +363,7 @@ const fullTraces: Record<string, DemoTrace> = {
       buildStep("trace-snapshot-2", "run-demo-memory-snapshot", "retrieve_global_memories", {
         planner_decision: {
           selected_tool: "retrieve_global_memories",
-          rationale: "Mention the reusable global memory layer as well.",
+          rationale: "顺便补充全局可复用记忆这一层。",
           fallback_used: false,
         },
       }, {
@@ -375,34 +375,34 @@ const fullTraces: Record<string, DemoTrace> = {
         retrieval_skipped: true,
         planner_decision: {
           selected_tool: "direct_final_answer",
-          rationale: "No source reread is required because the memory inventory is already structured.",
+          rationale: "记忆清单本身已经结构化，不需要再回读原文。",
           fallback_used: false,
         },
       }, {
-        answer_preview: "The system stores paper memory, open questions, and supporting source chunks.",
+        answer_preview: "系统会存论文记忆、开放问题以及支撑它们的原文 chunk。",
       }, "2026-05-08T10:09:32Z", "2026-05-08T10:09:43Z"),
     ],
     narratives: [
       {
         trace_step_id: "trace-snapshot-3",
-        reason_text: "The memory drawer already exposes the stored structures directly.",
-        impact_text: "The reply explains the persistent layer without re-opening the source document.",
+        reason_text: "memory drawer 本身就已经直接暴露了这些存储结构。",
+        impact_text: "因此可以不重新打开原文，也能解释持久化层存了什么。",
       },
     ],
   },
 };
 
 const allTimelineEvents: Array<TimelineEvent & { visibleAt: number }> = [
-  buildEvent("evt-1", "run-demo-search-import-answer", "run_started", "Query started: search candidate papers before import.", 1, [], []),
-  buildEvent("evt-2", "run-demo-search-import-answer", "step_completed", "search_arxiv returned 3 candidate papers.", 2, [], []),
-  buildEvent("evt-3", "run-demo-search-import-answer", "step_completed", "import_arxiv_paper imported arXiv:2401.12345 through the ingest run.", 2, [], ["paper:arxiv:2401.12345"]),
-  buildEvent("evt-4", "run-demo-search-import-answer", "assistant_message_committed", "The imported paper is now available as session memory.", 2, ["memory-paper-2401", "memory-open-2401"], ["paper:arxiv:2401.12345"]),
-  buildEvent("evt-5", "run-demo-memory-followup", "run_started", "Follow-up started: session memory is checked before source rereads.", 3, [], ["paper:arxiv:2401.12345"]),
-  buildEvent("evt-6", "run-demo-memory-followup", "run_finished", "The answer was completed directly from session and global memory.", 4, ["memory-paper-2401", "memory-global-1"], ["paper:arxiv:2401.12345"]),
-  buildEvent("evt-7", "run-demo-rag-comparison", "run_started", "Comparison run started: use durable memory to contrast this agent with RAG.", 5, [], ["paper:arxiv:2401.12345"]),
-  buildEvent("evt-8", "run-demo-rag-comparison", "run_finished", "The comparison answer was produced without rereading the source.", 6, ["memory-paper-2401", "memory-global-1"], ["paper:arxiv:2401.12345"]),
-  buildEvent("evt-9", "run-demo-memory-snapshot", "run_started", "Memory snapshot run started: explain what long-term memory stores.", 7, [], ["paper:arxiv:2401.12345"]),
-  buildEvent("evt-10", "run-demo-memory-snapshot", "run_finished", "The memory inventory answer was completed from stored structures.", 8, ["memory-paper-2401", "memory-open-2401", "memory-global-1"], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-1", "run-demo-search-import-answer", "run_started", "问答已开始：先搜索候选论文，再决定导入。", 1, [], []),
+  buildEvent("evt-2", "run-demo-search-import-answer", "step_completed", "search_arxiv 返回了 3 篇候选论文。", 2, [], []),
+  buildEvent("evt-3", "run-demo-search-import-answer", "step_completed", "import_arxiv_paper 通过 ingest run 导入了 arXiv:2401.12345。", 2, [], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-4", "run-demo-search-import-answer", "assistant_message_committed", "导入后的论文已经可以作为会话记忆参与后续回答。", 2, ["memory-paper-2401", "memory-open-2401"], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-5", "run-demo-memory-followup", "run_started", "追问已开始：先查 session memory，再决定是否回读原文。", 3, [], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-6", "run-demo-memory-followup", "run_finished", "这轮回答直接由会话记忆和全局记忆完成。", 4, ["memory-paper-2401", "memory-global-1"], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-7", "run-demo-rag-comparison", "run_started", "对比问答开始：用长期记忆说明它和 RAG 的区别。", 5, [], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-8", "run-demo-rag-comparison", "run_finished", "这次对比回答没有回读原文。", 6, ["memory-paper-2401", "memory-global-1"], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-9", "run-demo-memory-snapshot", "run_started", "记忆说明问答开始：解释长期记忆层实际存了什么。", 7, [], ["paper:arxiv:2401.12345"]),
+  buildEvent("evt-10", "run-demo-memory-snapshot", "run_finished", "记忆清单回答已经基于现有存储结构完成。", 8, ["memory-paper-2401", "memory-open-2401", "memory-global-1"], ["paper:arxiv:2401.12345"]),
 ];
 
 const sessionMemoryBundles: MemoryBundles = {
@@ -421,7 +421,7 @@ const sessionMemoryBundles: MemoryBundles = {
           id: "memory-paper-2401",
           memory_type: "paper_memory",
           content:
-            "The paper proposes a memory-routed research agent that decides whether to answer from structured memory, search additional memory, or reread source passages instead of following a fixed retrieve-then-generate pipeline.",
+            "这篇论文提出了一种记忆路由研究 Agent：它不会固定走 retrieve-then-generate，而是根据问题决定直接用结构化记忆回答、继续检索记忆，还是回读原文片段。",
           created_at: "2026-05-08T10:01:02Z",
           updated_at: "2026-05-08T10:01:12Z",
           paper_id: "paper:arxiv:2401.12345",
@@ -439,7 +439,7 @@ const sessionMemoryBundles: MemoryBundles = {
           id: "memory-open-2401",
           memory_type: "open_question_memory",
           content:
-            "Open question: how stable are the memory-routing decisions when the session accumulates many partially overlapping papers and the model must avoid stale summaries?",
+            "开放问题：当一个 session 累积了许多部分重叠的论文时，模型如何稳定地做出记忆路由决策，并避免依赖过时摘要？",
           created_at: "2026-05-08T10:01:05Z",
           updated_at: "2026-05-08T10:01:12Z",
           paper_id: "paper:arxiv:2401.12345",
@@ -460,7 +460,7 @@ const sessionMemoryBundles: MemoryBundles = {
           page: 2,
           section: "Introduction",
           excerpt:
-            "We replace fixed retrieval ladders with model-routed decisions over session memory, global memory, and source reread.",
+            "我们用模型驱动的路由决策，替代了固定的检索梯子，让系统在 session memory、global memory 和原文回读之间自主选择。",
         },
         {
           chunk_id: "chunk-2401-31",
@@ -468,7 +468,7 @@ const sessionMemoryBundles: MemoryBundles = {
           page: 8,
           section: "Limitations",
           excerpt:
-            "Routing quality may degrade as the session accumulates overlapping summaries and unresolved questions.",
+            "当 session 中堆积越来越多重叠摘要和未解决问题时，路由质量可能会下降。",
         },
       ],
       source_chunk_count: 2,
@@ -494,7 +494,7 @@ const globalMemoryBundles: MemoryBundles = {
           id: "memory-global-1",
           memory_type: "paper_memory",
           content:
-            "Global lesson: scientific agents answer more consistently when session memory is checked before any fresh passage reread.",
+            "全局经验：科学研究型 Agent 如果先检查 session memory，再决定是否回读原文，回答通常会更稳定。",
           created_at: "2026-05-01T09:20:00Z",
           updated_at: "2026-05-01T09:20:00Z",
           paper_id: "paper:arxiv:2310.56789",
@@ -515,7 +515,7 @@ const globalMemoryBundles: MemoryBundles = {
           paper_id: "paper:arxiv:2310.56789",
           page: 3,
           section: "Approach",
-          excerpt: "Memory-first routing reduces unnecessary rereads and makes later answers auditable.",
+          excerpt: "记忆优先路由可以减少不必要的原文回读，也让后续回答更可审计。",
         },
       ],
       source_chunk_count: 1,
@@ -599,7 +599,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function readOnlyResponse(): Response {
-  return jsonResponse({ detail: "Demo is read-only. Use Docker deployment for the live app." }, 405);
+  return jsonResponse({ detail: "当前是静态演示，只读不可写。真实交互请使用 Docker 部署版本。" }, 405);
 }
 
 function subscribe(listener: () => void): () => void {

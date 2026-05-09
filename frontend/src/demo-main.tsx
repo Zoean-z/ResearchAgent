@@ -10,8 +10,8 @@ installDemoApi();
 function DemoBanner() {
   return (
     <div className="demo-banner">
-      <strong>Static Demo</strong>
-      <span>Read-only showcase using the real frontend with mocked session data.</span>
+      <strong>静态演示</strong>
+      <span>使用真实前端和预制会话数据的只读展示。</span>
     </div>
   );
 }
