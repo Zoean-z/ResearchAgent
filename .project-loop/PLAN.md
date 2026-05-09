@@ -57,6 +57,9 @@ Refactor ingest extraction so paper understanding comes from the model over clea
 - [x] After `get_paper_memory_bundle`, jump straight into model finalization instead of asking for another structured decision
 - [x] Add JSON mode and explicit JSON examples to the DeepSeek structured query-decision prompt
 - [x] Inject compact recent conversation context into query turns and expose `list_recent_messages` / `get_conversation_context` as optional query tools
+- [x] Add a model-callable `import_arxiv_paper` query tool that reuses the existing arXiv ingest run chain instead of creating a new PDF URL path
+- [x] Add a model-callable `search_arxiv` query tool that returns lightweight arXiv metadata and keeps import as a separate explicit step
+- [x] Add a query-time no-result fallback so arXiv search/import failures surface as observations instead of failing the whole run
 - [x] Ingest stage-1 stopgap repair removed production fallback/template overwrite paths, disabled cross-paper open-question merge, and disabled weak relation generation
 - [x] Refactor ingest extraction to model-first full-text or hierarchical extraction with evidence-bound field outputs
 - [x] Remove production dependence on keyword scoring and candidate-ranking for paper understanding
@@ -98,3 +101,10 @@ Refactor ingest extraction so paper understanding comes from the model over clea
 # Next Step
 
 The ingest extraction debug evidence is now recorded in the run trace, including the input chunk ids and the field-level reviews. The next useful slice is final-answer token streaming; after that, only later ingest wording tuning should remain if the model output drifts again.
+
+# Deployment Slice
+
+- [x] Add a GitHub Pages-ready static demo that uses the real frontend with mocked `/api` data and fixed showcase conversations
+- [x] Add Docker deployment files so the real frontend/backend stack can be started with `docker compose up --build`
+- [x] Keep the existing direct arXiv paste behavior unchanged while exposing the same frontend shell in the static demo
+- [ ] Validate Docker build/runtime on a machine with Docker available and confirm the published Pages URL after push

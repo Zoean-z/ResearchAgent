@@ -4,12 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+import re
 from typing import Protocol
 
 from research_agent.tools.protocol import ChunkDescriptor, MemoryDescriptor, QueryToolName
+from research_agent.tools.arxiv_reference import extract_arxiv_id_or_url_from_text
 
+_ARXIV_SEARCH_INTENT_PATTERN = re.compile(
+    r"(?:\barxiv\b.*(?:search|find|look\s+for|discover)|(?:search|find|look\s+for).*\barxiv\b|(?:搜索|查找|找|检索).*(?:arxiv|论文|papers?)|(?:arxiv|论文|papers?).*(?:搜索|查找|找|检索))",
+    re.IGNORECASE,
+)
 
 HOST_CONTROLLED_QUERY_TOOLS: tuple[QueryToolName, ...] = (
+    QueryToolName.IMPORT_ARXIV_PAPER,
+    QueryToolName.SEARCH_ARXIV,
     QueryToolName.SEARCH_SESSION_MEMORY,
     QueryToolName.SEARCH_GLOBAL_MEMORY,
     QueryToolName.SEARCH_SOURCE_CHUNKS,
@@ -42,6 +50,7 @@ class QueryToolPlannerDecision:
 
     tool_name: QueryToolName
     rationale: str
+    tool_parameters: dict[str, object] | None = None
     planner_name: str = "heuristic"
     fallback_used: bool = False
 
@@ -76,6 +85,26 @@ class HeuristicQueryToolPlannerClient:
         if not allowed:
             return None
 
+        if QueryToolName.IMPORT_ARXIV_PAPER in allowed:
+            arxiv_id_or_url = extract_arxiv_id_or_url_from_text(query)
+            if arxiv_id_or_url is not None:
+                return QueryToolPlannerDecision(
+                    tool_name=QueryToolName.IMPORT_ARXIV_PAPER,
+                    rationale=self._rationale_for(tool_name=QueryToolName.IMPORT_ARXIV_PAPER, state=state, query=query),
+                    tool_parameters={"arxiv_id_or_url": arxiv_id_or_url},
+                    planner_name="heuristic",
+                    fallback_used=False,
+                )
+
+        if QueryToolName.SEARCH_ARXIV in allowed and _ARXIV_SEARCH_INTENT_PATTERN.search(query):
+            return QueryToolPlannerDecision(
+                tool_name=QueryToolName.SEARCH_ARXIV,
+                rationale=self._rationale_for(tool_name=QueryToolName.SEARCH_ARXIV, state=state, query=query),
+                tool_parameters={"query": query.strip()},
+                planner_name="heuristic",
+                fallback_used=False,
+            )
+
         if (
             state.should_reread_source is False
             and QueryToolName.COMPOSE_ANSWER in allowed
@@ -99,6 +128,8 @@ class HeuristicQueryToolPlannerClient:
             )
 
         for tool_name in HOST_CONTROLLED_QUERY_TOOLS:
+            if tool_name in {QueryToolName.IMPORT_ARXIV_PAPER, QueryToolName.SEARCH_ARXIV}:
+                continue
             if tool_name in allowed:
                 return QueryToolPlannerDecision(
                     tool_name=tool_name,
@@ -115,6 +146,10 @@ class HeuristicQueryToolPlannerClient:
         state: QueryToolPlannerState,
         query: str,
     ) -> str:
+        if tool_name is QueryToolName.IMPORT_ARXIV_PAPER:
+            return "user_provided_arxiv_reference_import_into_session_before_answering"
+        if tool_name is QueryToolName.SEARCH_ARXIV:
+            return "user_requested_arxiv_paper_discovery_before_session_import"
         if tool_name is QueryToolName.SEARCH_SESSION_MEMORY:
             return "memory_first_rule_requires_session_memory_before_any_other_context"
         if tool_name is QueryToolName.SEARCH_GLOBAL_MEMORY:
@@ -136,7 +171,6 @@ class HeuristicQueryToolPlannerClient:
                 return "selected_memory_is_sufficient_compose_without_source_reread"
             return "no_supporting_memory_selected_compose_with_explicit_fallback_context"
         return f"heuristic_planner_selected_{tool_name.value}"
-
 
 __all__ = [
     "HOST_CONTROLLED_QUERY_TOOLS",

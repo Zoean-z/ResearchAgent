@@ -1,0 +1,16 @@
+services:
+  research-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8011:8000"
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      RESEARCH_AGENT_STORAGE_BACKEND: sqlite
+      RESEARCH_AGENT_SQLITE_PATH: /app/data/sqlite/research_agent.sqlite3
+      RESEARCH_AGENT_OPENVIKING_BACKEND: noop
+      RESEARCH_AGENT_QUERY_AGENT_BACKEND: turn_adapter
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

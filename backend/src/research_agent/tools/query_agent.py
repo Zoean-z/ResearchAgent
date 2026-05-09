@@ -47,6 +47,7 @@ class PlannerBackedQueryAgentClient:
         decision = QueryTurnDecision(
             action_type="tool_call",
             tool_name=planner_decision.tool_name,
+            tool_parameters=planner_decision.tool_parameters or {},
             rationale=planner_decision.rationale,
             agent_name=self._agent_name if planner_decision.planner_name == "heuristic" else planner_decision.planner_name,
             fallback_used=planner_decision.fallback_used,

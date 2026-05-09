@@ -6,6 +6,8 @@ input model, and structured output model. The protocol is intentionally decouple
 from domain models so it can evolve independently.
 
 Query tool subset (frozen for Phase 1):
+  - search_arxiv
+  - import_arxiv_paper
   - search_session_memory
   - search_global_memory
   - search_source_chunks
@@ -25,7 +27,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
+
+from research_agent.tools.arxiv_reference import normalize_arxiv_id_or_url
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +44,8 @@ class QueryToolName(StrEnum):
     The runtime must reject any tool not in this enumeration.
     """
 
+    IMPORT_ARXIV_PAPER = "import_arxiv_paper"
+    SEARCH_ARXIV = "search_arxiv"
     SEARCH_SESSION_MEMORY = "search_session_memory"
     SEARCH_GLOBAL_MEMORY = "search_global_memory"
     SEARCH_OPENVIKING_MEMORY = "search_openviking_memory"
@@ -280,6 +286,34 @@ class SearchSourceChunksInput(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20, description="Maximum chunks to return")
 
 
+class SearchArxivInput(BaseModel):
+    """Parameters for searching lightweight arXiv metadata only."""
+
+    query: str = Field(min_length=1, description="Natural-language research query for arXiv discovery")
+    max_results: int = Field(default=10, ge=1, description="Requested result count; the runtime clamps it to at most 50")
+    category: str | None = Field(default=None, description="Optional arXiv category such as cs.LG or cs.CL")
+    sort_by: str = Field(default="relevance", description="arXiv API sortBy value: relevance, lastUpdatedDate, or submittedDate")
+    sort_order: str = Field(default="descending", description="arXiv API sortOrder value: ascending or descending")
+
+
+class ImportArxivPaperInput(BaseModel):
+    """Parameters for importing one arXiv paper into the current session."""
+
+    arxiv_id_or_url: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("arxiv_id_or_url", "arxiv_url"),
+        description=(
+            "Accepts an arXiv id like 2401.12345 or 2401.12345v2, or an arXiv abs/pdf URL. "
+            "The runtime normalizes it to a canonical https://arxiv.org/abs/{id} URL before import."
+        ),
+    )
+
+    @field_validator("arxiv_id_or_url")
+    @classmethod
+    def _normalize_arxiv_reference(cls, value: str) -> str:
+        return normalize_arxiv_id_or_url(value)
+
+
 class RerankCandidatesInput(BaseModel):
     """Parameters for reranking a bounded pool of memory or chunk candidates."""
 
@@ -448,6 +482,61 @@ class SearchSourceChunksOutput(BaseModel):
     )
 
 
+class ArxivPaperDescriptor(BaseModel):
+    """Lightweight arXiv paper metadata returned by search_arxiv."""
+
+    arxiv_id: str
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    abstract: str
+    published: str
+    updated: str
+    categories: list[str] = Field(default_factory=list)
+    abs_url: str
+    pdf_url: str
+
+
+class SearchArxivOutput(BaseModel):
+    """Result of searching arXiv without importing or downloading papers."""
+
+    success: bool
+    query: str
+    count: int = Field(default=0, ge=0)
+    papers: list[ArxivPaperDescriptor] = Field(default_factory=list)
+    error: dict[str, Any] | None = Field(
+        default=None,
+        description="Structured error with code and message when success is false",
+    )
+
+
+class ImportedPaperSummaryDescriptor(BaseModel):
+    """Compact paper summary returned after an arXiv import finishes."""
+
+    what_it_is_about: str
+    problem_solved: str
+    new_ideas: tuple[str, ...] = Field(default_factory=tuple)
+    limitations: tuple[str, ...] = Field(default_factory=tuple)
+    suggestions_or_questions: tuple[str, ...] = Field(default_factory=tuple)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class ImportArxivPaperOutput(BaseModel):
+    """Result of importing one arXiv paper into the current session."""
+
+    run_id: str
+    message_id: str
+    paper_id: str
+    title: str
+    arxiv_id: str | None = None
+    artifact_id: str
+    session_document_id: str
+    source_type: Literal["arxiv"]
+    operation: str
+    chunk_count: int = Field(ge=0)
+    ingest_summary: str
+    paper_summary: ImportedPaperSummaryDescriptor
+
+
 class ListSessionPapersOutput(BaseModel):
     """Result of listing papers/documents for the current session."""
 
@@ -592,6 +681,19 @@ Callers must check for ToolError before interpreting result.
 
 QUERY_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
+        name=QueryToolName.SEARCH_ARXIV,
+        description="Search arXiv for papers matching a research query. Returns lightweight metadata including title, authors, abstract, arXiv id, abs URL, and PDF URL. Use this to discover candidate papers. This tool does not import, download, or parse papers. To add a selected paper to the current research session, call import_arxiv_paper with its arxiv_id or URL.",
+        input_model=SearchArxivInput,
+        output_model=SearchArxivOutput,
+    ),
+    ToolDefinition(
+        name=QueryToolName.IMPORT_ARXIV_PAPER,
+        description="Import one arXiv paper into the current session through the existing ingest run flow. "
+        "Use this when the user explicitly asks to import an arXiv paper or provides an arXiv link that should be added to the session before answering.",
+        input_model=ImportArxivPaperInput,
+        output_model=ImportArxivPaperOutput,
+    ),
+    ToolDefinition(
         name=QueryToolName.SEARCH_SESSION_MEMORY,
         description="Search memories scoped to the current session by document bindings. "
         "Always called first in the memory-first retrieval order.",
@@ -731,12 +833,16 @@ def validate_tool_request(request: ToolRequest) -> ToolError | None:
 
 
 __all__ = [
+    "ArxivPaperDescriptor",
     "ChunkDescriptor",
     "ComposeAnswerInput",
     "ComposeAnswerOutput",
     "ConversationEvidenceRefDescriptor",
     "GetConversationContextInput",
     "GetConversationContextOutput",
+    "ImportedPaperSummaryDescriptor",
+    "ImportArxivPaperInput",
+    "ImportArxivPaperOutput",
     "ListRecentMessagesInput",
     "ListRecentMessagesOutput",
     "MemoryDescriptor",
@@ -752,6 +858,8 @@ __all__ = [
     "QueryToolName",
     "QUERY_TOOL_DEFINITIONS",
     "QUERY_TOOL_BY_NAME",
+    "SearchArxivInput",
+    "SearchArxivOutput",
     "ReadSourcePassagesInput",
     "ReadSourcePassagesOutput",
     "RerankCandidatesInput",

@@ -134,6 +134,8 @@ class PydanticAIQueryTurnClient:
                     "For tool calls, fill tool_parameters with business parameters only; never include runtime context such as session_id.",
                     "Default to final_answer when the user query can already be answered well without another tool call.",
                     "Use tool_call only when another bounded tool will materially improve the answer.",
+                    "If the user asks to discover or search for candidate arXiv papers, prefer search_arxiv before answering.",
+                    "If the user explicitly asks to import an arXiv paper or provides an arXiv link that should be added to the session, prefer import_arxiv_paper before answering.",
                     "Use final_answer for greetings, acknowledgements, capability questions, and other low-context turns that do not need retrieval.",
                     "Default final_answer language is Chinese; use English only if the user explicitly asks for English.",
                     "Do not call memory or source tools just to be safe when the question is already answerable.",

@@ -6,6 +6,13 @@ from importlib import import_module
 
 
 _EXPORT_MAP = {
+    "ArxivHttpResponse": ("research_agent.services.arxiv_search_service", "ArxivHttpResponse"),
+    "ArxivImportToolResult": ("research_agent.services.arxiv_import_tool_service", "ArxivImportToolResult"),
+    "ArxivImportToolService": ("research_agent.services.arxiv_import_tool_service", "ArxivImportToolService"),
+    "ArxivSearchError": ("research_agent.services.arxiv_search_service", "ArxivSearchError"),
+    "ArxivSearchPaper": ("research_agent.services.arxiv_search_service", "ArxivSearchPaper"),
+    "ArxivSearchResult": ("research_agent.services.arxiv_search_service", "ArxivSearchResult"),
+    "ArxivSearchService": ("research_agent.services.arxiv_search_service", "ArxivSearchService"),
     "AcceptedTaskRun": ("research_agent.services.task_run_service", "AcceptedTaskRun"),
     "ChunkRerankResult": ("research_agent.services.context_rerank_service", "ChunkRerankResult"),
     "ContextRerankerClient": ("research_agent.services.context_rerank_service", "ContextRerankerClient"),

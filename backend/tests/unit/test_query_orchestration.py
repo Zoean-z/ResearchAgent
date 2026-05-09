@@ -41,6 +41,8 @@ def test_query_orchestration_runner_allows_the_next_expected_tool() -> None:
     )
 
     assert selection.allowed_tools == (
+        QueryToolName.IMPORT_ARXIV_PAPER,
+        QueryToolName.SEARCH_ARXIV,
         QueryToolName.SEARCH_GLOBAL_MEMORY,
         QueryToolName.SEARCH_OPENVIKING_MEMORY,
         QueryToolName.LIST_SESSION_PAPERS,
@@ -56,6 +58,8 @@ def test_query_orchestration_runner_allows_the_next_expected_tool() -> None:
     assert selection.decision.tool_name is QueryToolName.SEARCH_GLOBAL_MEMORY
     assert client.last_request is not None
     assert client.last_request.allowed_actions == (
+        "import_arxiv_paper",
+        "search_arxiv",
         "search_global_memory",
         "search_openviking_memory",
         "list_session_papers",
@@ -89,6 +93,8 @@ def test_query_orchestration_runner_exposes_openviking_memory_as_companion_tool(
     )
 
     assert selection.allowed_tools == (
+        QueryToolName.IMPORT_ARXIV_PAPER,
+        QueryToolName.SEARCH_ARXIV,
         QueryToolName.SEARCH_SESSION_MEMORY,
         QueryToolName.SEARCH_GLOBAL_MEMORY,
         QueryToolName.SEARCH_OPENVIKING_MEMORY,
@@ -104,6 +110,8 @@ def test_query_orchestration_runner_exposes_openviking_memory_as_companion_tool(
     assert selection.decision.tool_name is QueryToolName.SEARCH_OPENVIKING_MEMORY
     assert client.last_request is not None
     assert client.last_request.allowed_actions == (
+        "import_arxiv_paper",
+        "search_arxiv",
         "search_session_memory",
         "search_global_memory",
         "search_openviking_memory",
@@ -190,6 +198,8 @@ def test_query_orchestration_runner_broadens_the_later_tool_pool_after_rerank() 
     )
 
     assert selection.allowed_tools == (
+        QueryToolName.IMPORT_ARXIV_PAPER,
+        QueryToolName.SEARCH_ARXIV,
         QueryToolName.SEARCH_OPENVIKING_MEMORY,
         QueryToolName.LIST_SESSION_PAPERS,
         QueryToolName.GET_PAPER_MEMORY_BUNDLE,
@@ -231,6 +241,8 @@ def test_query_orchestration_runner_does_not_reoffer_completed_tools_in_the_unif
     assert QueryToolName.SEARCH_GLOBAL_MEMORY not in selection.allowed_tools
     assert QueryToolName.RERANK_CANDIDATES not in selection.allowed_tools
     assert selection.allowed_tools == (
+        QueryToolName.IMPORT_ARXIV_PAPER,
+        QueryToolName.SEARCH_ARXIV,
         QueryToolName.SEARCH_OPENVIKING_MEMORY,
         QueryToolName.LIST_SESSION_PAPERS,
         QueryToolName.GET_PAPER_MEMORY_BUNDLE,

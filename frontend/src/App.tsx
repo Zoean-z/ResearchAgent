@@ -188,6 +188,8 @@ function getUiText(language: UiLanguage) {
     failureReason: isZh ? "失败原因" : "Failure Reason",
     thinking: isZh ? "正在思考中" : "Thinking",
     directFinalAnswer: isZh ? "直接生成回答" : "Direct Final Answer",
+    searchArxiv: isZh ? "搜索 arXiv" : "Search arXiv",
+    importArxivPaper: isZh ? "导入 arXiv 论文" : "Import arXiv Paper",
     retrieveSessionMemories: isZh ? "检索会话记忆" : "Retrieve Session Memories",
     retrieveGlobalMemories: isZh ? "检索全局记忆" : "Retrieve Global Memories",
     rerankContextCandidates: isZh ? "重排记忆候选" : "Rerank Context Candidates",
@@ -276,6 +278,8 @@ function getUiText(language: UiLanguage) {
     },
     describeStepAction(action: string) {
       if (action === "direct_final_answer") return isZh ? "直接生成回答" : "Direct Final Answer";
+      if (action === "search_arxiv") return isZh ? "搜索 arXiv" : "Search arXiv";
+      if (action === "import_arxiv_paper") return isZh ? "导入 arXiv 论文" : "Import arXiv Paper";
       if (action === "retrieve_session_memories") return isZh ? "检索会话记忆" : "Retrieve Session Memories";
       if (action === "retrieve_global_memories") return isZh ? "检索全局记忆" : "Retrieve Global Memories";
       if (action === "rerank_context_candidates") return isZh ? "重排记忆候选" : "Rerank Context Candidates";
@@ -440,6 +444,14 @@ function summarizeTraceResult(step: TraceStep, ui: UiText): string[] {
     lines.push(`${ui.answerPreview}=${stringifyCompact(payload.answer_preview)}`);
     lines.push(`${ui.memoryCitations}=${Array.isArray(payload.memory_citations) ? payload.memory_citations.length : 0}`);
     lines.push(`${ui.sourceChunks}=${Array.isArray(payload.source_reread_chunks) ? payload.source_reread_chunks.length : 0}`);
+  } else if (step.action === "search_arxiv") {
+    lines.push(`query=${stringifyCompact(payload.query)}`);
+    lines.push(`count=${stringifyCompact(payload.count)}`);
+    lines.push(`success=${stringifyCompact(payload.success)}`);
+  } else if (step.action === "import_arxiv_paper") {
+    lines.push(`arxiv_id=${stringifyCompact(payload.arxiv_id)}`);
+    lines.push(`${ui.paperId}=${stringifyCompact(payload.paper_id)}`);
+    lines.push(`${ui.chunkCount}=${stringifyCompact(payload.chunk_count)}`);
   } else if (step.action === "direct_final_answer") {
     lines.push(`${ui.answerPreview}=${stringifyCompact(payload.answer_preview)}`);
     lines.push(`${ui.retrievalSkipped}=${stringifyCompact(step.input_payload.retrieval_skipped)}`);
@@ -473,6 +485,8 @@ function summarizeTraceResult(step: TraceStep, ui: UiText): string[] {
 
 function describeStepAction(action: string, ui: UiText): string {
   if (action === "direct_final_answer") return ui.directFinalAnswer;
+  if (action === "search_arxiv") return ui.searchArxiv;
+  if (action === "import_arxiv_paper") return ui.importArxivPaper;
   if (action === "retrieve_session_memories") return ui.retrieveSessionMemories;
   if (action === "retrieve_global_memories") return ui.retrieveGlobalMemories;
   if (action === "rerank_context_candidates") return ui.rerankContextCandidates;

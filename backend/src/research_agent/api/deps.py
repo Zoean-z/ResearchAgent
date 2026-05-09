@@ -57,6 +57,8 @@ from research_agent.domain.ports import (
 )
 from research_agent.services.message_intake_service import MessageIntakeService
 from research_agent.services import (
+    ArxivImportToolService,
+    ArxivSearchService,
     ContextRerankService,
     DeletionService,
     MemorySnapshotService,
@@ -260,13 +262,21 @@ def create_service_bundle(repositories: RepositoryBundle) -> ServiceBundle:
         trace_repository=repositories.trace,
         runtime_event_broker=runtime_event_broker,
     )
+    message_intake_service = MessageIntakeService(
+        task_run_service=task_run_service,
+        openviking_bundle=openviking_bundle,
+    )
+    tool_registry.set_arxiv_import_service(
+        ArxivImportToolService(
+            message_intake_service=message_intake_service,
+            task_runtime_service=task_runtime_service,
+        )
+    )
+    tool_registry.set_arxiv_search_service(ArxivSearchService())
 
     return ServiceBundle(
         sessions=SessionService(session_repository=repositories.sessions),
-        message_intake=MessageIntakeService(
-            task_run_service=task_run_service,
-            openviking_bundle=openviking_bundle,
-        ),
+        message_intake=message_intake_service,
         messages=MessageQueryService(
             session_repository=repositories.sessions,
             message_repository=repositories.messages,

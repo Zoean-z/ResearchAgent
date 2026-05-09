@@ -9,10 +9,12 @@ from typing import Any
 from research_agent.domain.models import Chunk, OpenQuestionMemory, PaperMemory, RelationMemory
 from research_agent.services.retrieval_service import MemoryRetrievalResult, SourceRereadResult
 from research_agent.tools.protocol import (
+    ArxivPaperDescriptor,
     ChunkDescriptor,
     ComposeAnswerOutput,
     GetConversationContextOutput,
     GetPaperMemoryBundleOutput,
+    ImportArxivPaperOutput,
     ListSessionPapersOutput,
     ListRecentMessagesOutput,
     MemoryDescriptor,
@@ -21,6 +23,7 @@ from research_agent.tools.protocol import (
     ReadSourcePassagesOutput,
     RerankCandidatesInput,
     RerankCandidatesOutput,
+    SearchArxivOutput,
     SearchGlobalMemoryOutput,
     SearchOpenVikingMemoryOutput,
     SearchSessionMemoryOutput,
@@ -66,7 +69,69 @@ class QueryToolExecutor:
 
         try:
             params = get_query_tool_definition(request.tool_name).input_model.model_validate(request.parameters)
-            if request.tool_name is QueryToolName.SEARCH_SESSION_MEMORY:
+            if request.tool_name is QueryToolName.SEARCH_ARXIV:
+                raw_result = self._registry.search_arxiv(
+                    query=params.query,
+                    max_results=params.max_results,
+                    category=params.category,
+                    sort_by=params.sort_by,
+                    sort_order=params.sort_order,
+                )
+                output = SearchArxivOutput(
+                    success=raw_result.success,
+                    query=raw_result.query,
+                    count=raw_result.count,
+                    papers=[
+                        ArxivPaperDescriptor(
+                            arxiv_id=paper.arxiv_id,
+                            title=paper.title,
+                            authors=list(paper.authors),
+                            abstract=paper.abstract,
+                            published=paper.published,
+                            updated=paper.updated,
+                            categories=list(paper.categories),
+                            abs_url=paper.abs_url,
+                            pdf_url=paper.pdf_url,
+                        )
+                        for paper in raw_result.papers
+                    ],
+                    error=(
+                        {
+                            "code": raw_result.error.code,
+                            "message": raw_result.error.message,
+                        }
+                        if raw_result.error is not None
+                        else None
+                    ),
+                )
+            elif request.tool_name is QueryToolName.IMPORT_ARXIV_PAPER:
+                session_id = self._runtime_session_id(runtime_context)
+                raw_result = self._registry.import_arxiv_paper(
+                    session_id=session_id,
+                    arxiv_id_or_url=params.arxiv_id_or_url,
+                )
+                output = ImportArxivPaperOutput(
+                    run_id=raw_result.execution.task_run.id,
+                    message_id=raw_result.submitted.message.id,
+                    paper_id=raw_result.execution.materialization.paper.id,
+                    title=raw_result.execution.materialization.paper.title,
+                    arxiv_id=raw_result.execution.materialization.paper.arxiv_id,
+                    artifact_id=raw_result.execution.materialization.artifact.id,
+                    session_document_id=raw_result.execution.materialization.session_document.id,
+                    source_type=raw_result.execution.source_type.value,
+                    operation=raw_result.execution.materialization.operation,
+                    chunk_count=raw_result.execution.chunk_count,
+                    ingest_summary=raw_result.execution.ingest_summary,
+                    paper_summary={
+                        "what_it_is_about": raw_result.execution.paper_summary.what_it_is_about,
+                        "problem_solved": raw_result.execution.paper_summary.problem_solved,
+                        "new_ideas": raw_result.execution.paper_summary.new_ideas,
+                        "limitations": raw_result.execution.paper_summary.limitations,
+                        "suggestions_or_questions": raw_result.execution.paper_summary.suggestions_or_questions,
+                        "confidence": raw_result.execution.paper_summary.confidence,
+                    },
+                )
+            elif request.tool_name is QueryToolName.SEARCH_SESSION_MEMORY:
                 raw_result = self._registry.search_session_memory(
                     session_id=params.session_id,
                     query=params.query,

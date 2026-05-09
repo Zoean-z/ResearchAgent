@@ -1,0 +1,16 @@
+.git
+.github
+.vscode
+.claude
+.env
+.pytest_cache
+__pycache__
+*.pyc
+frontend/node_modules
+frontend/dist
+backend/tests
+data/artifacts/uploads
+data/sqlite/*.sqlite3
+data/sqlite/*.db
+data/sqlite/*.sqlite
+data/openviking/ov.conf

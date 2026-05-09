@@ -58,6 +58,9 @@ from research_agent.domain.policies import build_canonical_key
 from research_agent.domain.value_objects import ConfidenceScore
 from research_agent.services import (
     AcceptedTaskRun,
+    ArxivHttpResponse,
+    ArxivImportToolService,
+    ArxivSearchService,
     EntityNotFoundError,
     ContextRerankService,
     IngestExecutionService,
@@ -120,6 +123,23 @@ def _build_minimal_pdf_bytes(text: str) -> bytes:
     output.extend(f"{xref_start}\n".encode("ascii"))
     output.extend(b"%%EOF\n")
     return bytes(output)
+
+
+_ARXIV_SEARCH_FEED = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2401.12345v1</id>
+    <updated>2026-01-02T00:00:00Z</updated>
+    <published>2026-01-01T00:00:00Z</published>
+    <title>Memory-Routed Research Agents</title>
+    <summary>Search-first discovery for paper agents.</summary>
+    <author><name>Alice</name></author>
+    <link href="http://arxiv.org/abs/2401.12345v1" rel="alternate" type="text/html" />
+    <link title="pdf" href="http://arxiv.org/pdf/2401.12345v1.pdf" rel="related" type="application/pdf" />
+    <category term="cs.AI" />
+  </entry>
+</feed>
+"""
 
 
 class _JsonSafeEnum(str, Enum):
@@ -280,6 +300,8 @@ def test_internal_tool_registry_lists_the_first_batch_of_tools() -> None:
     assert tool_names == {
         "register_paper",
         "extract_memories",
+        "import_arxiv_paper",
+        "search_arxiv",
         "search_openviking_memory",
         "search_session_memory",
         "search_global_memory",
@@ -294,6 +316,123 @@ def test_internal_tool_registry_lists_the_first_batch_of_tools() -> None:
     }
     assert registry.invoke("search_session_memory", session_id=session.id, query="accuracy", top_k=5).memories
     assert registry.invoke("read_source_passages", session_id=session.id, query="accuracy", related_paper_ids=[paper.id], top_k=3).selected
+
+
+@pytest.mark.parametrize(
+    ("arxiv_id_or_url", "expected_abs_url", "expected_arxiv_id"),
+    [
+        ("2401.12345", "https://arxiv.org/abs/2401.12345", "2401.12345"),
+        ("https://arxiv.org/abs/2401.12345", "https://arxiv.org/abs/2401.12345", "2401.12345"),
+        ("https://arxiv.org/pdf/2401.12345.pdf", "https://arxiv.org/abs/2401.12345", "2401.12345"),
+    ],
+)
+def test_arxiv_import_tool_service_reuses_existing_accept_and_runtime_chain(
+    monkeypatch,
+    arxiv_id_or_url: str,
+    expected_abs_url: str,
+    expected_arxiv_id: str,
+) -> None:
+    session_repository = InMemorySessionRepository()
+    message_repository = InMemoryMessageRepository()
+    trace_repository = InMemoryTraceRepository()
+    timeline_repository = InMemoryTimelineRepository()
+    paper_repository = InMemoryPaperRepository()
+    artifact_repository = InMemoryArtifactRepository()
+    chunk_repository = InMemoryChunkRepository()
+    memory_repository = InMemoryMemoryRepository()
+    openviking_bundle = build_inmemory_openviking_surface_bundle()
+    session = session_repository.save(SessionService(session_repository=session_repository).create_session("Tool Import"))
+    task_run_service = TaskRunService(
+        session_repository=session_repository,
+        message_repository=message_repository,
+        trace_repository=trace_repository,
+    )
+    message_intake_service = MessageIntakeService(
+        task_run_service=task_run_service,
+        openviking_bundle=openviking_bundle,
+    )
+    ingest_execution_service = IngestExecutionService(
+        message_repository=message_repository,
+        materialization_service=IngestMaterializationService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            artifact_repository=artifact_repository,
+            chunk_repository=chunk_repository,
+        ),
+        memory_extraction_service=MemoryExtractionService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            chunk_repository=chunk_repository,
+            memory_repository=memory_repository,
+        ),
+        trace_repository=trace_repository,
+        timeline_repository=timeline_repository,
+        openviking_bundle=openviking_bundle,
+    )
+    query_execution_service = QueryExecutionService(
+        message_repository=message_repository,
+        retrieval_service=RetrievalService(
+            session_repository=session_repository,
+            memory_repository=memory_repository,
+            chunk_repository=chunk_repository,
+        ),
+        context_rerank_service=ContextRerankService(),
+        session_repository=session_repository,
+        trace_repository=trace_repository,
+        timeline_repository=timeline_repository,
+        query_agent_client=StaticFinalAnswerQueryAgentClient("unused"),
+    )
+    task_runtime_service = TaskRuntimeService(
+        task_run_service=task_run_service,
+        query_execution_service=query_execution_service,
+        ingest_execution_service=ingest_execution_service,
+        trace_repository=trace_repository,
+    )
+    service = ArxivImportToolService(
+        message_intake_service=message_intake_service,
+        task_runtime_service=task_runtime_service,
+    )
+
+    result = service.import_arxiv_paper(
+        session_id=session.id,
+        arxiv_id_or_url=arxiv_id_or_url,
+    )
+
+    assert result.submitted.message.type is MessageType.INGEST_ARXIV
+    assert result.submitted.message.content == expected_abs_url
+    assert result.execution.task_run.status is TaskRunStatus.FINISHED
+    assert result.execution.source_type is SourceType.ARXIV
+    assert result.execution.materialization.paper.arxiv_id == expected_arxiv_id
+    assert result.execution.materialization.artifact.uri_or_path == expected_abs_url
+    assert result.execution.chunk_count == 1
+
+
+def test_arxiv_import_tool_service_rejects_invalid_input_before_submit() -> None:
+    class StubMessageIntakeService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        def submit_arxiv_ingest(self, session_id: str, arxiv_url: str):
+            self.calls.append((session_id, arxiv_url))
+            raise AssertionError("submit_arxiv_ingest should not be called for invalid input")
+
+    class StubTaskRuntimeService:
+        def execute_ingest_run(self, session_id: str, run_id: str):
+            raise AssertionError("execute_ingest_run should not be called for invalid input")
+
+    intake_service = StubMessageIntakeService()
+    service = ArxivImportToolService(
+        message_intake_service=intake_service,  # type: ignore[arg-type]
+        task_runtime_service=StubTaskRuntimeService(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValueError):
+        service.import_arxiv_paper(
+            session_id="session-1",
+            arxiv_id_or_url="2401.12",
+        )
+
+    assert intake_service.calls == []
 
 
 def test_message_query_service_requires_session() -> None:
@@ -1436,6 +1575,441 @@ def test_query_execution_service_returns_list_session_papers_observation_to_mode
     assert observation.payload["papers"][0]["paper_id"] == paper.id
     assert observation.payload["papers"][0]["file_name"] == "listed.pdf"
     assert trace_repository.list_steps(accepted.task_run.id)[0].action == "list_session_papers"
+
+
+def test_query_execution_service_returns_arxiv_import_observation_to_model(monkeypatch) -> None:
+    class ImportThenFinalAgent:
+        def __init__(self) -> None:
+            self.requests: list[AgentTurnRequest] = []
+            self._agent_name = "import_agent"
+
+        def decide_turn(self, request: AgentTurnRequest) -> AgentTurnDecision | None:
+            self.requests.append(request)
+            if not any(observation.kind == "arxiv_import" for observation in request.observations):
+                return AgentTurnDecision(
+                    action_type=AgentActionType.TOOL_CALL,
+                    tool_name="import_arxiv_paper",
+                    tool_parameters={"arxiv_id_or_url": "2401.12345"},
+                    rationale="model_imports_arxiv_before_answering",
+                )
+            return AgentTurnDecision(
+                action_type=AgentActionType.FINAL_ANSWER,
+                final_answer="模型已通过 import_arxiv_paper 导入论文。",
+                rationale="model_answers_from_import_observation",
+                stop_reason=AgentStopReason.FINAL_ANSWER_READY,
+            )
+
+    session_repository = InMemorySessionRepository()
+    message_repository = InMemoryMessageRepository()
+    memory_repository = InMemoryMemoryRepository()
+    chunk_repository = InMemoryChunkRepository()
+    paper_repository = InMemoryPaperRepository()
+    artifact_repository = InMemoryArtifactRepository()
+    trace_repository = InMemoryTraceRepository()
+    timeline_repository = InMemoryTimelineRepository()
+    openviking_bundle = build_inmemory_openviking_surface_bundle()
+    session = session_repository.save(SessionService(session_repository=session_repository).create_session("Import In Query"))
+    task_run_service = TaskRunService(
+        session_repository=session_repository,
+        message_repository=message_repository,
+        trace_repository=trace_repository,
+    )
+    accepted = task_run_service.accept_followup_query(session.id, "请导入这篇 arXiv 论文并告诉我是否导入成功。")
+    task_run_service.mark_running(session.id, accepted.task_run.id)
+    retrieval_service = RetrievalService(
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+    )
+    tool_registry = InternalToolRegistry(
+        paper_repository=paper_repository,
+        retrieval_service=retrieval_service,
+        context_rerank_service=ContextRerankService(),
+        memory_extraction_service=MemoryExtractionService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            chunk_repository=chunk_repository,
+            memory_repository=memory_repository,
+        ),
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+        artifact_repository=artifact_repository,
+    )
+    ingest_execution_service = IngestExecutionService(
+        message_repository=message_repository,
+        materialization_service=IngestMaterializationService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            artifact_repository=artifact_repository,
+            chunk_repository=chunk_repository,
+            tool_registry=tool_registry,
+        ),
+        memory_extraction_service=MemoryExtractionService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            chunk_repository=chunk_repository,
+            memory_repository=memory_repository,
+        ),
+        trace_repository=trace_repository,
+        timeline_repository=timeline_repository,
+        tool_registry=tool_registry,
+        openviking_bundle=openviking_bundle,
+    )
+    agent = ImportThenFinalAgent()
+    query_execution_service = QueryExecutionService(
+        message_repository=message_repository,
+        retrieval_service=retrieval_service,
+        context_rerank_service=ContextRerankService(),
+        session_repository=session_repository,
+        trace_repository=trace_repository,
+        timeline_repository=timeline_repository,
+        tool_registry=tool_registry,
+        query_tool_executor=QueryToolExecutor(tool_registry),
+        query_agent_client=agent,
+        openviking_bundle=openviking_bundle,
+    )
+    task_runtime_service = TaskRuntimeService(
+        task_run_service=task_run_service,
+        query_execution_service=query_execution_service,
+        ingest_execution_service=ingest_execution_service,
+        trace_repository=trace_repository,
+    )
+    message_intake_service = MessageIntakeService(
+        task_run_service=task_run_service,
+        openviking_bundle=openviking_bundle,
+    )
+    tool_registry.set_arxiv_import_service(
+        ArxivImportToolService(
+            message_intake_service=message_intake_service,
+            task_runtime_service=task_runtime_service,
+        )
+    )
+
+    result = query_execution_service.execute_query_run(session.id, accepted.task_run.id)
+
+    assert result.answer == "模型已通过 import_arxiv_paper 导入论文。"
+    assert result.tool_calls[0].tool_name == "import_arxiv_paper"
+    trace_steps = trace_repository.list_steps(accepted.task_run.id)
+    assert trace_steps[0].action == "import_arxiv_paper"
+    imported_runs = [run for run in task_run_service.list_runs(session.id) if run.id != accepted.task_run.id]
+    assert len(imported_runs) == 1
+    observation = agent.requests[1].observations[0]
+    assert observation.kind == "arxiv_import"
+    assert observation.payload["paper_id"]
+    assert observation.payload["arxiv_id"] == "2401.12345"
+
+
+def test_query_execution_service_returns_no_result_observation_when_arxiv_import_download_fails(monkeypatch) -> None:
+    class ImportThenFinalAgent:
+        def __init__(self) -> None:
+            self.requests: list[AgentTurnRequest] = []
+            self._agent_name = "import_failure_agent"
+
+        def decide_turn(self, request: AgentTurnRequest) -> AgentTurnDecision | None:
+            self.requests.append(request)
+            if not any(observation.kind == "arxiv_import" for observation in request.observations):
+                return AgentTurnDecision(
+                    action_type=AgentActionType.TOOL_CALL,
+                    tool_name="import_arxiv_paper",
+                    tool_parameters={"arxiv_id_or_url": "2401.12345"},
+                    rationale="model_attempts_import_before_answering",
+                )
+            return AgentTurnDecision(
+                action_type=AgentActionType.FINAL_ANSWER,
+                final_answer="模型确认这次没有可导入的 arXiv 结果。",
+                rationale="model_answers_from_failed_import_observation",
+                stop_reason=AgentStopReason.FINAL_ANSWER_READY,
+            )
+
+    monkeypatch.setattr(
+        IngestMaterializationService,
+        "_download_arxiv_pdf",
+        lambda self, pdf_url, source_value: (_ for _ in ()).throw(URLError("down")),
+    )
+
+    session_repository = InMemorySessionRepository()
+    message_repository = InMemoryMessageRepository()
+    memory_repository = InMemoryMemoryRepository()
+    chunk_repository = InMemoryChunkRepository()
+    paper_repository = InMemoryPaperRepository()
+    artifact_repository = InMemoryArtifactRepository()
+    trace_repository = InMemoryTraceRepository()
+    timeline_repository = InMemoryTimelineRepository()
+    openviking_bundle = build_inmemory_openviking_surface_bundle()
+    session = session_repository.save(SessionService(session_repository=session_repository).create_session("Import Failure In Query"))
+    task_run_service = TaskRunService(
+        session_repository=session_repository,
+        message_repository=message_repository,
+        trace_repository=trace_repository,
+    )
+    accepted = task_run_service.accept_followup_query(session.id, "请导入这篇 arXiv 论文，如果失败就告诉我没有结果。")
+    task_run_service.mark_running(session.id, accepted.task_run.id)
+    retrieval_service = RetrievalService(
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+    )
+    tool_registry = InternalToolRegistry(
+        paper_repository=paper_repository,
+        retrieval_service=retrieval_service,
+        context_rerank_service=ContextRerankService(),
+        memory_extraction_service=MemoryExtractionService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            chunk_repository=chunk_repository,
+            memory_repository=memory_repository,
+        ),
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+        artifact_repository=artifact_repository,
+    )
+    ingest_execution_service = IngestExecutionService(
+        message_repository=message_repository,
+        materialization_service=IngestMaterializationService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            artifact_repository=artifact_repository,
+            chunk_repository=chunk_repository,
+            tool_registry=tool_registry,
+        ),
+        memory_extraction_service=MemoryExtractionService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            chunk_repository=chunk_repository,
+            memory_repository=memory_repository,
+        ),
+        trace_repository=trace_repository,
+        timeline_repository=timeline_repository,
+        tool_registry=tool_registry,
+        openviking_bundle=openviking_bundle,
+    )
+    agent = ImportThenFinalAgent()
+    query_execution_service = QueryExecutionService(
+        message_repository=message_repository,
+        retrieval_service=retrieval_service,
+        context_rerank_service=ContextRerankService(),
+        session_repository=session_repository,
+        trace_repository=trace_repository,
+        timeline_repository=timeline_repository,
+        tool_registry=tool_registry,
+        query_tool_executor=QueryToolExecutor(tool_registry),
+        query_agent_client=agent,
+        openviking_bundle=openviking_bundle,
+    )
+    task_runtime_service = TaskRuntimeService(
+        task_run_service=task_run_service,
+        query_execution_service=query_execution_service,
+        ingest_execution_service=ingest_execution_service,
+        trace_repository=trace_repository,
+    )
+    message_intake_service = MessageIntakeService(
+        task_run_service=task_run_service,
+        openviking_bundle=openviking_bundle,
+    )
+    tool_registry.set_arxiv_import_service(
+        ArxivImportToolService(
+            message_intake_service=message_intake_service,
+            task_runtime_service=task_runtime_service,
+        )
+    )
+
+    result = query_execution_service.execute_query_run(session.id, accepted.task_run.id)
+
+    assert result.answer == "模型确认这次没有可导入的 arXiv 结果。"
+    observation = agent.requests[1].observations[0]
+    assert observation.kind == "arxiv_import"
+    assert observation.payload["success"] is False
+    assert observation.payload["paper_id"] is None
+    assert observation.payload["error"]["code"] == "no_results"
+    assert observation.payload["error"]["upstream_error_code"] == "tool_execution_failed"
+    trace_steps = trace_repository.list_steps(accepted.task_run.id)
+    assert trace_steps[0].action == "import_arxiv_paper"
+    assert trace_steps[0].result_payload["success"] is False
+
+
+def test_query_execution_service_returns_arxiv_search_observation_to_model() -> None:
+    class SearchThenFinalAgent:
+        def __init__(self) -> None:
+            self.requests: list[AgentTurnRequest] = []
+            self._agent_name = "search_agent"
+
+        def decide_turn(self, request: AgentTurnRequest) -> AgentTurnDecision | None:
+            self.requests.append(request)
+            if not any(observation.kind == "arxiv_search" for observation in request.observations):
+                return AgentTurnDecision(
+                    action_type=AgentActionType.TOOL_CALL,
+                    tool_name="search_arxiv",
+                    tool_parameters={"query": "memory-routed research agents", "max_results": 5},
+                    rationale="model_searches_arxiv_before_importing",
+                )
+            return AgentTurnDecision(
+                action_type=AgentActionType.FINAL_ANSWER,
+                final_answer="模型已检索到候选 arXiv 论文。",
+                rationale="model_answers_from_arxiv_search_observation",
+                stop_reason=AgentStopReason.FINAL_ANSWER_READY,
+            )
+
+    session_repository = InMemorySessionRepository()
+    message_repository = InMemoryMessageRepository()
+    memory_repository = InMemoryMemoryRepository()
+    chunk_repository = InMemoryChunkRepository()
+    paper_repository = InMemoryPaperRepository()
+    artifact_repository = InMemoryArtifactRepository()
+    trace_repository = InMemoryTraceRepository()
+    timeline_repository = InMemoryTimelineRepository()
+    session = session_repository.save(SessionService(session_repository=session_repository).create_session("Search In Query"))
+    task_run_service = TaskRunService(
+        session_repository=session_repository,
+        message_repository=message_repository,
+        trace_repository=trace_repository,
+    )
+    accepted = task_run_service.accept_followup_query(session.id, "帮我找一些 arXiv 论文。")
+    task_run_service.mark_running(session.id, accepted.task_run.id)
+    retrieval_service = RetrievalService(
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+    )
+    tool_registry = InternalToolRegistry(
+        paper_repository=paper_repository,
+        retrieval_service=retrieval_service,
+        context_rerank_service=ContextRerankService(),
+        memory_extraction_service=MemoryExtractionService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            chunk_repository=chunk_repository,
+            memory_repository=memory_repository,
+        ),
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+        artifact_repository=artifact_repository,
+    )
+    tool_registry.set_arxiv_search_service(
+        ArxivSearchService(
+            http_get=lambda url, timeout: ArxivHttpResponse(
+                status_code=200,
+                body=_ARXIV_SEARCH_FEED.encode("utf-8"),
+            )
+        )
+    )
+    agent = SearchThenFinalAgent()
+    query_execution_service = QueryExecutionService(
+        message_repository=message_repository,
+        retrieval_service=retrieval_service,
+        context_rerank_service=ContextRerankService(),
+        session_repository=session_repository,
+        trace_repository=trace_repository,
+        timeline_repository=timeline_repository,
+        tool_registry=tool_registry,
+        query_tool_executor=QueryToolExecutor(tool_registry),
+        query_agent_client=agent,
+    )
+
+    result = query_execution_service.execute_query_run(session.id, accepted.task_run.id)
+
+    assert result.answer == "模型已检索到候选 arXiv 论文。"
+    assert result.tool_calls[0].tool_name == "search_arxiv"
+    trace_steps = trace_repository.list_steps(accepted.task_run.id)
+    assert trace_steps[0].action == "search_arxiv"
+    observation = agent.requests[1].observations[0]
+    assert observation.kind == "arxiv_search"
+    assert observation.payload["success"] is True
+    assert observation.payload["papers"][0]["arxiv_id"] == "2401.12345v1"
+    assert observation.payload["papers"][0]["abs_url"] == "https://arxiv.org/abs/2401.12345v1"
+
+
+def test_query_execution_service_returns_no_result_observation_when_arxiv_search_fails() -> None:
+    class SearchThenFinalAgent:
+        def __init__(self) -> None:
+            self.requests: list[AgentTurnRequest] = []
+            self._agent_name = "search_failure_agent"
+
+        def decide_turn(self, request: AgentTurnRequest) -> AgentTurnDecision | None:
+            self.requests.append(request)
+            if not any(observation.kind == "arxiv_search" for observation in request.observations):
+                return AgentTurnDecision(
+                    action_type=AgentActionType.TOOL_CALL,
+                    tool_name="search_arxiv",
+                    tool_parameters={"query": "memory-routed research agents", "max_results": 5},
+                    rationale="model_searches_arxiv_before_answering",
+                )
+            return AgentTurnDecision(
+                action_type=AgentActionType.FINAL_ANSWER,
+                final_answer="模型确认当前没有可用的 arXiv 搜索结果。",
+                rationale="model_answers_from_failed_arxiv_search_observation",
+                stop_reason=AgentStopReason.FINAL_ANSWER_READY,
+            )
+
+    session_repository = InMemorySessionRepository()
+    message_repository = InMemoryMessageRepository()
+    memory_repository = InMemoryMemoryRepository()
+    chunk_repository = InMemoryChunkRepository()
+    paper_repository = InMemoryPaperRepository()
+    artifact_repository = InMemoryArtifactRepository()
+    trace_repository = InMemoryTraceRepository()
+    timeline_repository = InMemoryTimelineRepository()
+    session = session_repository.save(SessionService(session_repository=session_repository).create_session("Search Failure In Query"))
+    task_run_service = TaskRunService(
+        session_repository=session_repository,
+        message_repository=message_repository,
+        trace_repository=trace_repository,
+    )
+    accepted = task_run_service.accept_followup_query(session.id, "帮我找一些 arXiv 论文，如果搜不到就告诉我没有结果。")
+    task_run_service.mark_running(session.id, accepted.task_run.id)
+    retrieval_service = RetrievalService(
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+    )
+    tool_registry = InternalToolRegistry(
+        paper_repository=paper_repository,
+        retrieval_service=retrieval_service,
+        context_rerank_service=ContextRerankService(),
+        memory_extraction_service=MemoryExtractionService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            chunk_repository=chunk_repository,
+            memory_repository=memory_repository,
+        ),
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+        artifact_repository=artifact_repository,
+    )
+    tool_registry.set_arxiv_search_service(
+        ArxivSearchService(
+            http_get=lambda url, timeout: (_ for _ in ()).throw(URLError("down"))
+        )
+    )
+    agent = SearchThenFinalAgent()
+    query_execution_service = QueryExecutionService(
+        message_repository=message_repository,
+        retrieval_service=retrieval_service,
+        context_rerank_service=ContextRerankService(),
+        session_repository=session_repository,
+        trace_repository=trace_repository,
+        timeline_repository=timeline_repository,
+        tool_registry=tool_registry,
+        query_tool_executor=QueryToolExecutor(tool_registry),
+        query_agent_client=agent,
+    )
+
+    result = query_execution_service.execute_query_run(session.id, accepted.task_run.id)
+
+    assert result.answer == "模型确认当前没有可用的 arXiv 搜索结果。"
+    observation = agent.requests[1].observations[0]
+    assert observation.kind == "arxiv_search"
+    assert observation.payload["success"] is False
+    assert observation.payload["count"] == 0
+    assert observation.payload["papers"] == []
+    assert observation.payload["error"]["code"] == "no_results"
+    assert observation.payload["error"]["upstream_error_code"] == "network_error"
+    trace_steps = trace_repository.list_steps(accepted.task_run.id)
+    assert trace_steps[0].action == "search_arxiv"
+    assert trace_steps[0].result_payload["success"] is False
 
 
 def test_query_execution_service_returns_paper_memory_bundle_observation_to_model() -> None:

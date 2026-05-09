@@ -651,6 +651,8 @@ class DeepSeekStructuredQueryAgentTransport:
             "You may either request one next tool call or return a final answer. "
             "Prefer final_answer whenever the query is already answerable without retrieval. "
             "Use tool_call only when another bounded tool will materially improve the answer. "
+            "If the user asks to discover or search for candidate arXiv papers, prefer search_arxiv before answering. "
+            "If the user explicitly asks to import an arXiv paper or provides an arXiv link that should be added to the session, prefer import_arxiv_paper before answering. "
             "For greetings, acknowledgements, capability questions, or other low-context conversational turns, prefer final_answer immediately. "
             "Default final_answer language is Chinese; use English only if the user explicitly asks for English. "
             "When recent conversation context is provided, use it to resolve follow-up references such as 'this paper', 'it', or 'the previous result'. "
@@ -682,6 +684,8 @@ class DeepSeekStructuredQueryAgentTransport:
                 "observations": to_json_safe([observation.model_dump(mode="python") for observation in prompt.observations]),
                 "instruction": (
                     "Choose either tool_call or final_answer. If tool_call, tool_name must be one of allowed_tools and tool_parameters may contain only business parameters. "
+                    "If the user wants candidate arXiv papers for a research topic, call search_arxiv first. "
+                    "If the user explicitly wants to import an arXiv paper into the session, call import_arxiv_paper with arxiv_id_or_url before answering. "
                     "If final_answer, provide final_answer text and do not invent extra tools. "
                     "Do not include session_id or other runtime-owned ids unless the tool explicitly asks for that business id, such as paper_id. "
                     "Default final_answer language is Chinese unless the user explicitly asks for another language. "

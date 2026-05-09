@@ -165,6 +165,8 @@ class QueryOrchestrationRunner:
     def allowed_actions_for_query_loop(self, state: QueryTurnState) -> tuple[tuple[QueryToolName, ...], bool]:
         allowed_tools: list[QueryToolName] = []
         query_tool_pool = (
+            QueryToolName.IMPORT_ARXIV_PAPER,
+            QueryToolName.SEARCH_ARXIV,
             QueryToolName.SEARCH_SESSION_MEMORY,
             QueryToolName.SEARCH_GLOBAL_MEMORY,
             QueryToolName.SEARCH_OPENVIKING_MEMORY,

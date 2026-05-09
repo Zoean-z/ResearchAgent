@@ -187,6 +187,144 @@ class QueryExecutionService:
             turn_index = len(tool_calls)
             tool_calls.append(self._planned_tool_call(decision, allowed_tools, turn_index=turn_index))
 
+            if decision.action_type == "tool_call" and decision.tool_name is QueryToolName.SEARCH_ARXIV:
+                planner_metadata["search_arxiv"] = self._planner_payload(decision, allowed_tools, turn_index=turn_index)
+                search_query = self._decision_parameter(decision, "query", query)
+                max_results = self._decision_parameter(decision, "max_results", 10)
+                category = self._decision_parameter(decision, "category", None)
+                sort_by = self._decision_parameter(decision, "sort_by", "relevance")
+                sort_order = self._decision_parameter(decision, "sort_order", "descending")
+                search_execution = self._query_tool_executor.execute_with_raw(
+                    ToolRequest(
+                        tool_name=QueryToolName.SEARCH_ARXIV,
+                        parameters={
+                            "query": search_query,
+                            "max_results": max_results,
+                            "category": category,
+                            "sort_by": sort_by,
+                            "sort_order": sort_order,
+                        },
+                    )
+                )
+                search_result = self._arxiv_search_result_payload(
+                    search_execution.outcome,
+                    query=search_query,
+                )
+                observations.append(
+                    turn_observation(
+                        kind="arxiv_search",
+                        summary=(
+                            f"arXiv search returned {search_result['count']} papers for query "
+                            f"{search_result['query']!r}."
+                            if search_result["success"]
+                            else f"arXiv search returned no usable results for query {search_result['query']!r}."
+                        ),
+                        payload={
+                            "tool_name": QueryToolName.SEARCH_ARXIV.value,
+                            "success": search_result["success"],
+                            "query": search_result["query"],
+                            "count": search_result["count"],
+                            "papers": search_result["papers"],
+                            "error": search_result.get("error"),
+                            "decision_impact": (
+                                "Use a returned arxiv_id or abs_url with import_arxiv_paper if one paper should be added to the session."
+                                if search_result["success"]
+                                else "If no papers are available, answer that no suitable arXiv results were found instead of importing."
+                            ),
+                        },
+                    )
+                )
+                self._trace_writer.save_tool_trace_step(
+                    session_id=session_id,
+                    run_id=run_id,
+                    action="search_arxiv",
+                    input_payload=self._with_planner_payload(
+                        {
+                            "query": search_query,
+                            "max_results": max_results,
+                            "category": category,
+                            "sort_by": sort_by,
+                            "sort_order": sort_order,
+                        },
+                        planner_metadata,
+                        "search_arxiv",
+                    ),
+                    result_payload=search_result,
+                )
+                tool_state = replace(
+                    tool_state,
+                    completed_tools=(*tool_state.completed_tools, QueryToolName.SEARCH_ARXIV),
+                )
+                continue
+
+            if decision.action_type == "tool_call" and decision.tool_name is QueryToolName.IMPORT_ARXIV_PAPER:
+                planner_metadata["import_arxiv_paper"] = self._planner_payload(decision, allowed_tools, turn_index=turn_index)
+                arxiv_id_or_url = self._decision_parameter(decision, "arxiv_id_or_url", None)
+                if arxiv_id_or_url is None:
+                    arxiv_id_or_url = self._decision_parameter(decision, "arxiv_url", None)
+                import_execution = self._query_tool_executor.execute_with_raw(
+                    ToolRequest(
+                        tool_name=QueryToolName.IMPORT_ARXIV_PAPER,
+                        parameters={"arxiv_id_or_url": arxiv_id_or_url},
+                    ),
+                    runtime_context={"session_id": session_id},
+                )
+                import_result = self._arxiv_import_result_payload(
+                    import_execution.outcome,
+                    requested_reference=arxiv_id_or_url,
+                )
+                observations.append(
+                    turn_observation(
+                        kind="arxiv_import",
+                        summary=(
+                            f"Imported arXiv paper {import_result['paper_id']} "
+                            f"with {import_result['chunk_count']} chunks."
+                            if import_result["success"]
+                            else f"No arXiv paper was imported for requested reference {arxiv_id_or_url!r}."
+                        ),
+                        payload={
+                            "tool_name": QueryToolName.IMPORT_ARXIV_PAPER.value,
+                            "success": import_result["success"],
+                            "requested_reference": import_result["requested_reference"],
+                            "import_run_id": import_result["run_id"],
+                            "message_id": import_result["message_id"],
+                            "paper_id": import_result["paper_id"],
+                            "title": import_result["title"],
+                            "arxiv_id": import_result["arxiv_id"],
+                            "artifact_id": import_result["artifact_id"],
+                            "session_document_id": import_result["session_document_id"],
+                            "chunk_count": import_result["chunk_count"],
+                            "operation": import_result["operation"],
+                            "ingest_summary": import_result["ingest_summary"],
+                            "paper_summary": import_result["paper_summary"],
+                            "error": import_result["error"],
+                            "decision_impact": (
+                                "Use the imported paper id for later paper-specific tools or answer directly from the import result."
+                                if import_result["success"]
+                                else "If no paper could be imported, answer that no import result is available and avoid paper-specific follow-up tools."
+                            ),
+                        },
+                    )
+                )
+                self._trace_writer.save_tool_trace_step(
+                    session_id=session_id,
+                    run_id=run_id,
+                    action="import_arxiv_paper",
+                    input_payload=self._with_planner_payload({"arxiv_id_or_url": arxiv_id_or_url}, planner_metadata, "import_arxiv_paper"),
+                    result_payload=import_result,
+                )
+                if import_result["success"]:
+                    related_paper_ids = tuple(self._related_paper_ids(session_id))
+                    recent_conversation_context = self._recent_conversation_context(
+                        session_id=session_id,
+                        current_message_id=task_run.message_id,
+                    )
+                tool_state = replace(
+                    tool_state,
+                    completed_tools=(*tool_state.completed_tools, QueryToolName.IMPORT_ARXIV_PAPER),
+                )
+                continue
+
             if decision.action_type == "tool_call" and decision.tool_name is QueryToolName.SEARCH_SESSION_MEMORY:
                 planner_metadata["retrieve_session_memories"] = self._planner_payload(decision, allowed_tools, turn_index=turn_index)
                 session_execution = self._query_tool_executor.execute_with_raw(
@@ -679,6 +817,72 @@ class QueryExecutionService:
                 )
             )
         return outcome
+
+    def _arxiv_search_result_payload(self, outcome, *, query: str) -> dict[str, object]:
+        if isinstance(outcome, ToolError):
+            return {
+                "success": False,
+                "query": query,
+                "count": 0,
+                "papers": [],
+                "error": self._no_result_error_payload(
+                    outcome.error_code.value,
+                    outcome.message,
+                ),
+            }
+        result = dict(outcome.result)
+        if result.get("success", False):
+            return result
+        error = result.get("error")
+        if isinstance(error, dict):
+            result["error"] = self._no_result_error_payload(
+                str(error.get("code", "search_failed")),
+                str(error.get("message", "No arXiv results were available.")),
+            )
+        else:
+            result["error"] = self._no_result_error_payload(
+                "search_failed",
+                "No arXiv results were available.",
+            )
+        result["count"] = 0
+        result["papers"] = []
+        return result
+
+    def _arxiv_import_result_payload(self, outcome, *, requested_reference: str | None) -> dict[str, object]:
+        if isinstance(outcome, ToolError):
+            return {
+                "success": False,
+                "requested_reference": requested_reference,
+                "run_id": None,
+                "message_id": None,
+                "paper_id": None,
+                "title": None,
+                "arxiv_id": None,
+                "artifact_id": None,
+                "session_document_id": None,
+                "chunk_count": 0,
+                "operation": "no_result",
+                "ingest_summary": "没有可导入的 arXiv 结果。",
+                "paper_summary": None,
+                "error": self._no_result_error_payload(
+                    outcome.error_code.value,
+                    outcome.message,
+                ),
+            }
+        return {
+            "success": True,
+            "requested_reference": requested_reference,
+            **dict(outcome.result),
+            "error": None,
+        }
+
+    def _no_result_error_payload(self, upstream_code: str, upstream_message: str) -> dict[str, object]:
+        return {
+            "code": "no_results",
+            "message": "No usable arXiv results were available.",
+            "upstream_error_code": upstream_code,
+            "upstream_error_message": upstream_message,
+        }
 
     def _decision_parameter(self, decision: QueryTurnDecision, name: str, default):
         parameters = decision.tool_parameters or {}

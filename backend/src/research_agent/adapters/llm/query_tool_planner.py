@@ -223,6 +223,7 @@ class ModelBackedQueryToolPlannerClient:
             return QueryToolPlannerDecision(
                 tool_name=fallback_decision.tool_name,
                 rationale=fallback_rationale,
+                tool_parameters=fallback_decision.tool_parameters,
                 planner_name=self._planner_name,
                 fallback_used=True,
             )

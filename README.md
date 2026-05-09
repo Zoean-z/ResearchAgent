@@ -6,6 +6,19 @@
   <img src="docs/demo.gif" width="800" alt="demo" />
 </p>
 
+## Demo & Deployment
+
+- Static demo: `https://zoean-z.github.io/ResearchAgent/`
+- Docker one-command run:
+
+```bash
+docker compose up --build
+```
+
+- Local app after Docker starts: `http://127.0.0.1:8011/`
+- The GitHub Pages demo is read-only and uses the real frontend with mocked `/api` responses.
+- The Docker deployment serves the real frontend and backend together; set `DEEPSEEK_API_KEY` before starting if you want live model calls.
+
 ---
 
 ## 核心功能

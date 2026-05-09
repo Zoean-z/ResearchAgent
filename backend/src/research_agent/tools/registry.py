@@ -30,6 +30,8 @@ from research_agent.tools.protocol import (
 )
 
 if TYPE_CHECKING:
+    from research_agent.services.arxiv_import_tool_service import ArxivImportToolResult, ArxivImportToolService
+    from research_agent.services.arxiv_search_service import ArxivSearchResult, ArxivSearchService
     from research_agent.services.context_rerank_service import (
         ChunkRerankResult,
         ContextRerankService,
@@ -84,9 +86,13 @@ class InternalToolRegistry:
         self._memory_repository = memory_repository
         self._chunk_repository = chunk_repository
         self._artifact_repository = artifact_repository
+        self._arxiv_import_service: ArxivImportToolService | None = None
+        self._arxiv_search_service: ArxivSearchService | None = None
         self._definitions = {
             "register_paper": RegistryToolEntry("register_paper", "Register or match a canonical paper record."),
             "extract_memories": RegistryToolEntry("extract_memories", "Extract paper, relation, and open-question memories."),
+            "import_arxiv_paper": RegistryToolEntry("import_arxiv_paper", "Import one arXiv paper into the current session through the existing ingest run flow."),
+            "search_arxiv": RegistryToolEntry("search_arxiv", "Search arXiv for lightweight paper metadata without importing or downloading PDFs."),
             "search_openviking_memory": RegistryToolEntry("search_openviking_memory", "Search OpenViking-backed memory and return bounded hits plus local-mapping metadata."),
             "search_session_memory": RegistryToolEntry("search_session_memory", "Search memories scoped to the current session."),
             "search_global_memory": RegistryToolEntry("search_global_memory", "Search globally stored memories."),
@@ -119,6 +125,10 @@ class InternalToolRegistry:
             return self.register_paper(**kwargs)
         if tool_name == "extract_memories":
             return self.extract_memories(**kwargs)
+        if tool_name == "import_arxiv_paper":
+            return self.import_arxiv_paper(**kwargs)
+        if tool_name == "search_arxiv":
+            return self.search_arxiv(**kwargs)
         if tool_name == "search_openviking_memory":
             return self.search_openviking_memory(**kwargs)
         if tool_name == "search_session_memory":
@@ -142,6 +152,16 @@ class InternalToolRegistry:
         if tool_name == "get_paper_memory_bundle":
             return self.get_paper_memory_bundle(**kwargs)
         raise KeyError(tool_name)
+
+    def set_arxiv_import_service(self, service: ArxivImportToolService) -> None:
+        """Attach the late-bound arXiv import service once runtime wiring exists."""
+
+        self._arxiv_import_service = service
+
+    def set_arxiv_search_service(self, service: ArxivSearchService) -> None:
+        """Attach the arXiv search service once runtime wiring exists."""
+
+        self._arxiv_search_service = service
 
     def register_paper(
         self,
@@ -183,6 +203,37 @@ class InternalToolRegistry:
         """Extract and store all first-pass memory types for a paper."""
 
         return self._memory_extraction_service.extract_and_store_memories(session_id=session_id, paper_id=paper_id)
+
+    def import_arxiv_paper(self, *, session_id: str, arxiv_id_or_url: str) -> ArxivImportToolResult:
+        """Import an arXiv paper through the existing accept-and-run ingest flow."""
+
+        if self._arxiv_import_service is None:
+            raise RuntimeError("ArXiv import service is not configured.")
+        return self._arxiv_import_service.import_arxiv_paper(
+            session_id=session_id,
+            arxiv_id_or_url=arxiv_id_or_url,
+        )
+
+    def search_arxiv(
+        self,
+        *,
+        query: str,
+        max_results: int = 10,
+        category: str | None = None,
+        sort_by: str = "relevance",
+        sort_order: str = "descending",
+    ) -> ArxivSearchResult:
+        """Search arXiv metadata without importing or downloading papers."""
+
+        if self._arxiv_search_service is None:
+            raise RuntimeError("ArXiv search service is not configured.")
+        return self._arxiv_search_service.search(
+            query=query,
+            max_results=max_results,
+            category=category,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
 
     def search_session_memory(self, session_id: str, query: str, top_k: int) -> MemoryRetrievalResult:
         """Search session-scoped memories."""

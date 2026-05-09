@@ -33,11 +33,14 @@ from research_agent.tools import (
     StaticFinalAnswerQueryAgentClient,
 )
 from research_agent.tools.protocol import (
+    ArxivPaperDescriptor,
     ChunkDescriptor,
     ComposeAnswerInput,
     ComposeAnswerOutput,
     GetPaperMemoryBundleInput,
     GetPaperMemoryBundleOutput,
+    ImportArxivPaperInput,
+    ImportArxivPaperOutput,
     ListSessionPapersInput,
     ListSessionPapersOutput,
     MemoryDescriptor,
@@ -49,6 +52,8 @@ from research_agent.tools.protocol import (
     ReadSourcePassagesOutput,
     RerankCandidatesInput,
     RerankCandidatesOutput,
+    SearchArxivInput,
+    SearchArxivOutput,
     SearchGlobalMemoryInput,
     SearchGlobalMemoryOutput,
     SearchOpenVikingMemoryInput,
@@ -74,6 +79,8 @@ from research_agent.tools.protocol import (
 
 
 def test_query_tool_names_are_stable() -> None:
+    assert QueryToolName.IMPORT_ARXIV_PAPER.value == "import_arxiv_paper"
+    assert QueryToolName.SEARCH_ARXIV.value == "search_arxiv"
     assert QueryToolName.SEARCH_SESSION_MEMORY.value == "search_session_memory"
     assert QueryToolName.SEARCH_GLOBAL_MEMORY.value == "search_global_memory"
     assert QueryToolName.SEARCH_OPENVIKING_MEMORY.value == "search_openviking_memory"
@@ -227,6 +234,46 @@ class TestSearchGlobalMemoryInput:
             top_k=10,
         )
         assert len(inp.related_paper_ids) == 2
+
+
+class TestImportArxivPaperInput:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("2401.12345", "https://arxiv.org/abs/2401.12345"),
+            ("2401.12345v2", "https://arxiv.org/abs/2401.12345v2"),
+            ("https://arxiv.org/abs/2401.12345", "https://arxiv.org/abs/2401.12345"),
+            ("https://arxiv.org/pdf/2401.12345.pdf", "https://arxiv.org/abs/2401.12345"),
+        ],
+    )
+    def test_valid_inputs_normalize_to_canonical_abs_url(self, value: str, expected: str) -> None:
+        inp = ImportArxivPaperInput(arxiv_id_or_url=value)
+        assert inp.arxiv_id_or_url == expected
+
+    def test_accepts_legacy_arxiv_url_alias(self) -> None:
+        inp = ImportArxivPaperInput(arxiv_url="https://arxiv.org/abs/2401.12345")
+        assert inp.arxiv_id_or_url == "https://arxiv.org/abs/2401.12345"
+
+    def test_invalid_empty_url(self) -> None:
+        with pytest.raises(ValidationError):
+            ImportArxivPaperInput(arxiv_url="")
+
+    def test_invalid_arxiv_id_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ImportArxivPaperInput(arxiv_id_or_url="not-an-arxiv-id")
+
+
+class TestSearchArxivInput:
+    def test_valid_defaults(self) -> None:
+        inp = SearchArxivInput(query="memory routing")
+        assert inp.query == "memory routing"
+        assert inp.max_results == 10
+        assert inp.sort_by == "relevance"
+        assert inp.sort_order == "descending"
+
+    def test_accepts_large_requested_max_results_for_runtime_clamp(self) -> None:
+        inp = SearchArxivInput(query="memory routing", max_results=999)
+        assert inp.max_results == 999
 
 
 class TestSearchOpenVikingMemoryInput:
@@ -387,6 +434,56 @@ def test_search_source_chunks_output() -> None:
     )
     assert len(out.chunks) == 1
     assert out.coverage_score == 0.5
+
+
+def test_search_arxiv_output_schema() -> None:
+    out = SearchArxivOutput(
+        success=True,
+        query="memory routing",
+        count=1,
+        papers=[
+            ArxivPaperDescriptor(
+                arxiv_id="2401.12345",
+                title="Memory Routing",
+                authors=["Alice"],
+                abstract="Abstract",
+                published="2026-01-01T00:00:00Z",
+                updated="2026-01-02T00:00:00Z",
+                categories=["cs.AI"],
+                abs_url="https://arxiv.org/abs/2401.12345",
+                pdf_url="https://arxiv.org/pdf/2401.12345.pdf",
+            )
+        ],
+    )
+    assert out.success is True
+    assert out.papers[0].arxiv_id == "2401.12345"
+
+
+def test_import_arxiv_paper_output_schema() -> None:
+    out = ImportArxivPaperOutput(
+        run_id="run-1",
+        message_id="message-1",
+        paper_id="paper-1",
+        title="Imported Paper",
+        arxiv_id="2401.12345",
+        artifact_id="artifact-1",
+        session_document_id="doc-1",
+        source_type="arxiv",
+        operation="created",
+        chunk_count=4,
+        ingest_summary="已解析 arXiv PDF。",
+        paper_summary={
+            "what_it_is_about": "A memory-routed paper agent.",
+            "problem_solved": "How to reuse memory before rereading papers.",
+            "new_ideas": ("Memory-first retrieval",),
+            "limitations": ("Needs more evaluation",),
+            "suggestions_or_questions": ("Test on more papers",),
+            "confidence": 0.8,
+        },
+    )
+    assert out.paper_id == "paper-1"
+    assert out.source_type == "arxiv"
+    assert out.paper_summary.what_it_is_about == "A memory-routed paper agent."
 
 
 def test_list_session_papers_schema_does_not_require_session_id() -> None:
@@ -631,6 +728,8 @@ def test_validate_rerank_candidates_invalid_kind() -> None:
 
 def test_all_tools_accept_valid_minimal_parameters() -> None:
     valid_parameters: dict[QueryToolName, dict] = {
+        QueryToolName.IMPORT_ARXIV_PAPER: {"arxiv_id_or_url": "2401.12345"},
+        QueryToolName.SEARCH_ARXIV: {"query": "memory routing"},
         QueryToolName.SEARCH_SESSION_MEMORY: {"session_id": "s1", "query": "q"},
         QueryToolName.SEARCH_GLOBAL_MEMORY: {"query": "q"},
         QueryToolName.SEARCH_OPENVIKING_MEMORY: {"scope": "session", "session_id": "s1", "query": "q"},
@@ -979,6 +1078,75 @@ def test_heuristic_query_tool_planner_chooses_expected_next_tool() -> None:
     assert after_rerank is not None
     assert after_rerank.tool_name is QueryToolName.READ_SOURCE_PASSAGES
     assert "reread" in after_rerank.rationale
+
+
+def test_heuristic_query_tool_planner_prefers_arxiv_import_when_query_contains_arxiv_url() -> None:
+    planner = HeuristicQueryToolPlannerClient()
+
+    decision = planner.choose_next_tool(
+        query="请先导入这篇论文 https://arxiv.org/abs/2401.12345",
+        state=QueryToolPlannerState(),
+        allowed_tools=(QueryToolName.IMPORT_ARXIV_PAPER, QueryToolName.SEARCH_SESSION_MEMORY),
+    )
+
+    assert decision is not None
+    assert decision.tool_name is QueryToolName.IMPORT_ARXIV_PAPER
+    assert decision.tool_parameters == {"arxiv_id_or_url": "https://arxiv.org/abs/2401.12345"}
+    assert "arxiv" in decision.rationale
+
+
+def test_heuristic_query_tool_planner_prefers_arxiv_import_for_bare_id_with_import_intent() -> None:
+    planner = HeuristicQueryToolPlannerClient()
+
+    decision = planner.choose_next_tool(
+        query="请先导入 2401.12345v2 这篇论文",
+        state=QueryToolPlannerState(),
+        allowed_tools=(QueryToolName.IMPORT_ARXIV_PAPER, QueryToolName.SEARCH_SESSION_MEMORY),
+    )
+
+    assert decision is not None
+    assert decision.tool_name is QueryToolName.IMPORT_ARXIV_PAPER
+    assert decision.tool_parameters == {"arxiv_id_or_url": "https://arxiv.org/abs/2401.12345v2"}
+
+
+def test_heuristic_query_tool_planner_prefers_arxiv_search_for_discovery_intent() -> None:
+    planner = HeuristicQueryToolPlannerClient()
+
+    decision = planner.choose_next_tool(
+        query="帮我搜索一些关于 memory-routed paper agents 的 arXiv 论文",
+        state=QueryToolPlannerState(),
+        allowed_tools=(QueryToolName.SEARCH_ARXIV, QueryToolName.SEARCH_SESSION_MEMORY),
+    )
+
+    assert decision is not None
+    assert decision.tool_name is QueryToolName.SEARCH_ARXIV
+    assert decision.tool_parameters == {"query": "帮我搜索一些关于 memory-routed paper agents 的 arXiv 论文"}
+
+
+def test_heuristic_query_tool_planner_does_not_misfire_on_ordinary_text() -> None:
+    planner = HeuristicQueryToolPlannerClient()
+
+    decision = planner.choose_next_tool(
+        query="请总结这篇论文的方法贡献，不需要导入新论文。",
+        state=QueryToolPlannerState(),
+        allowed_tools=(QueryToolName.IMPORT_ARXIV_PAPER, QueryToolName.SEARCH_SESSION_MEMORY),
+    )
+
+    assert decision is not None
+    assert decision.tool_name is QueryToolName.SEARCH_SESSION_MEMORY
+
+
+def test_heuristic_query_tool_planner_does_not_import_when_tool_is_not_allowed() -> None:
+    planner = HeuristicQueryToolPlannerClient()
+
+    decision = planner.choose_next_tool(
+        query="请先导入这篇论文 https://arxiv.org/abs/2401.12345",
+        state=QueryToolPlannerState(),
+        allowed_tools=(QueryToolName.SEARCH_SESSION_MEMORY,),
+    )
+
+    assert decision is not None
+    assert decision.tool_name is QueryToolName.SEARCH_SESSION_MEMORY
 
 
 def test_heuristic_query_tool_planner_returns_none_for_disallowed_tools() -> None:
