@@ -108,3 +108,17 @@ The ingest extraction debug evidence is now recorded in the run trace, including
 - [x] Add Docker deployment files so the real frontend/backend stack can be started with `docker compose up --build`
 - [x] Keep the existing direct arXiv paste behavior unchanged while exposing the same frontend shell in the static demo
 - [ ] Validate Docker build/runtime on a machine with Docker available and confirm the published Pages URL after push
+
+# Benchmark Pilot Slice
+
+- [x] Select a 4-paper pilot set from the existing arXiv imports
+- [x] Prepare benchmark-only askRAg markdown corpus from the current research-agent chunk store
+- [x] Rebuild askRAg index and confirm the pilot corpus is visible
+- [x] Run a first live 5-question pilot against both systems
+- [ ] Diagnose why research-agent query-time grounding does not reliably use already imported session papers
+- [x] Tighten heuristic `search_arxiv` triggering so only explicit paper-discovery intent can call it
+- [x] Temporarily remove `search_arxiv` from the normal query tool pool while keeping the implementation on disk
+- [x] Re-run the same 5 questions in fresh sessions after removing `search_arxiv` from the normal query tool pool
+- [ ] Diagnose why single-paper answers like `Q1` can still drift during final synthesis even when the tool path stays session-local
+- [x] Re-run the askRAg side with `deepseek-v4-flash` chat plus GLM embeddings and compare it against the latest usable ResearchAgent pilot slice
+- [x] Write the pilot benchmark findings into Chinese doc files and add a concise `Benchmark` section to the README

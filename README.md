@@ -1,6 +1,6 @@
 # Memory-Routed Paper Agent
 
-> 一个面向论文研究场景的 Agent：先导入论文、写入长期记忆，再让后续问答优先使用记忆，而不是每次都从 PDF 重新开始。
+> 一个**自主决策**的论文研究 Agent —— 模型自己判断何时检索、何时读原文、何时查长期记忆
 
 ## 核心架构选择
 
@@ -31,13 +31,31 @@
 
 这不是一个普通的“论文 PDF 聊天工具”。
 
-这个项目更关心的是：
+- 论文导入之后，系统把理解结果沉淀成结构化研究记忆
+- 后续追问时，系统先使用这些记忆，再决定是否回读原文
+- 前端把这条决策链清楚展示出来
 
-- 论文导入之后，系统能否把理解结果沉淀成结构化研究记忆
-- 后续追问时，系统能否先使用这些记忆，再决定是否回读原文
-- 前端能否把这条决策链清楚展示出来
+## Benchmark Snapshot
 
-所以它的核心价值不是“也能回答论文问题”，而是“能看见长期记忆如何影响下一轮回答”。
+目前已经做过一轮小样本 pilot：同一组 4 篇 arXiv 论文、5 个代表性问题，对比 `ResearchAgent` 和 `askRAg`。结论很直接：在聊天模型对齐到 `deepseek-v4-flash` 后，`ResearchAgent` 仍然在回答质量上占优；`askRAg` 在 OpenViking 关闭时更快，但开启 OpenViking 后这组题里没有换来明显质量收益，主要带来了更高延迟。
+
+| 系统 | 语料入口 | 主要检索/记忆路径 | 结果 | 平均耗时 |
+|---|---|---|---|---|
+| `ResearchAgent` | 原生 arXiv / PDF ingest | session memory -> global memory -> source reread | `4/5 correct`，`1/5 partial` | `53.63s` |
+| `askRAg` `OV off` | 同源论文转 markdown | `Chroma + embedding` 文档检索 | `0/5 correct`，`2/5 partial`，`3/5 wrong` | `36.00s` |
+| `askRAg` `OV on` | 同源论文转 markdown | `Chroma + embedding + OpenViking` | `1/5 partial`，`4/5 wrong` | `94.73s` |
+
+这轮结果更像是在比较两种系统实现，而不只是比较模型：
+
+- `ResearchAgent` 更偏 **paper-native**：先 ingest 成 `paper / artifact / chunk / session-document`，再围绕论文写结构化 memory，查询时先走 memory，不够再回读 source passages
+- `askRAg` 更偏 **document-native**：主路径仍然是 `Chroma + embedding` 文档检索，单文档问答较快，但跨论文比较和 follow-up grounding 更弱
+
+详细记录见：
+
+- `docs/benchmark_pilot_researchagent_answers_2026-05-10.md`
+- `docs/benchmark_pilot_compare_askrag_deepseek_vs_researchagent_2026-05-10.md`
+- `docs/benchmark_pilot_compare_askrag_with_openviking_vs_researchagent_2026-05-10.md`
+
 
 ## 和普通 RAG 的区别
 
@@ -253,3 +271,11 @@ scripts/    启动与辅助脚本
 - 更强的 ingest 质量控制与评估
 - 更丰富的 memory editing / inspection 工具
 - 在不改变核心 runtime 语义的前提下继续扩展工具面
+
+## Benchmark
+
+更完整的 benchmark 过程、逐题答案和 OpenViking on/off 对比，放在这三份中文记录里：
+
+- `docs/benchmark_pilot_researchagent_answers_2026-05-10.md`
+- `docs/benchmark_pilot_compare_askrag_deepseek_vs_researchagent_2026-05-10.md`
+- `docs/benchmark_pilot_compare_askrag_with_openviking_vs_researchagent_2026-05-10.md`
