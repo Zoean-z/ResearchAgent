@@ -2,6 +2,27 @@
 
 > 一个面向论文研究场景的 Agent：先导入论文、写入长期记忆，再让后续问答优先使用记忆，而不是每次都从 PDF 重新开始。
 
+## 核心架构选择
+
+这个项目在架构上保留了 OpenViking 作为长期记忆 / 检索适配层的明确边界，而不是把它完全混进运行时逻辑里。
+
+- **OpenViking 是什么**
+  - 一个面向 Agent / 记忆 / 检索场景的基础设施项目
+  - 在这个仓库里，它对应的是“可选的长期记忆与检索适配层”，而不是当前默认部署的硬依赖
+
+- **为什么这里要选它**
+  - 这个项目需要的不只是本地 chunk 检索，还需要一个清晰的“长期记忆系统”扩展方向
+  - OpenViking 给了比较明确的 memory / retrieval 边界，适合把 session memory、global memory 和后续更强的长期记忆能力留出演进空间
+  - 因此当前实现保留了 OpenViking 适配层，但把 runtime 的主语义继续掌握在本仓库自己手里
+
+- **tradeoff**
+  - 好处是：长期记忆边界更清楚，未来迁移和扩展空间更大
+  - 代价是：本地启动和部署复杂度会上升，所以当前默认运行路径仍然推荐 `SQLite + noop`
+  - 也就是说：架构上为 OpenViking 预留位置，但产品演示和默认部署不强依赖它
+
+- **背景讨论**
+  - RFC #1190: https://github.com/volcengine/OpenViking/discussions/1190
+
 <p align="center">
   <img src="docs/demo.gif" width="800" alt="demo" />
 </p>
