@@ -41,6 +41,8 @@
 
 同一组 4 篇 arXiv 论文、5 个代表性问题，对比 `ResearchAgent` 和 `askRAg`。在聊天模型都对齐到 `deepseek-v4-flash` 之后，`ResearchAgent` 仍然在回答质量上占优；`askRAg` 在 OpenViking 关闭时更快，但开启 OpenViking 后这组题里没有换来明显质量收益，主要带来了更高延迟。
 
+这是一轮**小样本 exploratory benchmark**，目的主要是验证两种系统路径的差异，而不是给出可统计外推的大规模正式结论。
+
 | 系统 | 语料入口 | 主要检索/记忆路径 | 结果 | 平均耗时 |
 |---|---|---|---|---|
 | `ResearchAgent` | 原生 arXiv / PDF ingest | session memory -> global memory -> source reread | `4/5 correct`，`1/5 partial` | `53.63s` |
