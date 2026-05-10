@@ -2,6 +2,12 @@
 
 > 一个**自主决策**的论文研究 Agent —— 模型自己判断何时检索、何时读原文、何时查长期记忆
 
+一个更接近“研究助手”而不是“PDF 聊天框”的系统：
+
+- 论文导入后不会只停留在 chunk 检索，而是沉淀成结构化 research memory
+- 后续问题优先走 `session memory -> global memory -> source reread`
+- 前端能直接看到工具调用、trace、timeline 和 memory 如何影响回答
+
 ## 核心架构选择
 
 这个项目在架构上保留了 OpenViking 作为长期记忆 / 检索适配层的明确边界，而不是把它完全混进运行时逻辑里。
@@ -29,15 +35,11 @@
 
 ## 项目定位
 
-这不是一个普通的“论文 PDF 聊天工具”。
-
-- 论文导入之后，系统把理解结果沉淀成结构化研究记忆
-- 后续追问时，系统先使用这些记忆，再决定是否回读原文
-- 前端把这条决策链清楚展示出来
+这不是一个普通的“论文 PDF 聊天工具”，而是一个把**论文导入、长期记忆、追问决策和可视化 trace**串成完整闭环的 Agent。
 
 ## Benchmark Snapshot
 
-目前已经做过一轮小样本 pilot：同一组 4 篇 arXiv 论文、5 个代表性问题，对比 `ResearchAgent` 和 `askRAg`。结论很直接：在聊天模型对齐到 `deepseek-v4-flash` 后，`ResearchAgent` 仍然在回答质量上占优；`askRAg` 在 OpenViking 关闭时更快，但开启 OpenViking 后这组题里没有换来明显质量收益，主要带来了更高延迟。
+同一组 4 篇 arXiv 论文、5 个代表性问题，对比 `ResearchAgent` 和 `askRAg`。在聊天模型都对齐到 `deepseek-v4-flash` 之后，`ResearchAgent` 仍然在回答质量上占优；`askRAg` 在 OpenViking 关闭时更快，但开启 OpenViking 后这组题里没有换来明显质量收益，主要带来了更高延迟。
 
 | 系统 | 语料入口 | 主要检索/记忆路径 | 结果 | 平均耗时 |
 |---|---|---|---|---|
@@ -50,7 +52,7 @@
 - `ResearchAgent` 更偏 **paper-native**：先 ingest 成 `paper / artifact / chunk / session-document`，再围绕论文写结构化 memory，查询时先走 memory，不够再回读 source passages
 - `askRAg` 更偏 **document-native**：主路径仍然是 `Chroma + embedding` 文档检索，单文档问答较快，但跨论文比较和 follow-up grounding 更弱
 
-详细记录见：
+详细记录：
 
 - `docs/benchmark_pilot_researchagent_answers_2026-05-10.md`
 - `docs/benchmark_pilot_compare_askrag_deepseek_vs_researchagent_2026-05-10.md`
