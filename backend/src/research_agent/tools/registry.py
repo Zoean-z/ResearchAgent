@@ -92,7 +92,6 @@ class InternalToolRegistry:
             "register_paper": RegistryToolEntry("register_paper", "Register or match a canonical paper record."),
             "extract_memories": RegistryToolEntry("extract_memories", "Extract paper, relation, and open-question memories."),
             "import_arxiv_paper": RegistryToolEntry("import_arxiv_paper", "Import one arXiv paper into the current session through the existing ingest run flow."),
-            "search_arxiv": RegistryToolEntry("search_arxiv", "Search arXiv for lightweight paper metadata without importing or downloading PDFs."),
             "search_openviking_memory": RegistryToolEntry("search_openviking_memory", "Search OpenViking-backed memory and return bounded hits plus local-mapping metadata."),
             "search_session_memory": RegistryToolEntry("search_session_memory", "Search memories scoped to the current session."),
             "search_global_memory": RegistryToolEntry("search_global_memory", "Search globally stored memories."),
@@ -552,13 +551,11 @@ class InternalToolRegistry:
             (turn for turn in reversed(conversation_turns) if turn.get("paper_id") or turn.get("last_answer_summary") or turn.get("active_topic")),
             None,
         )
-        active_paper_id = active_turn.get("paper_id") if active_turn is not None else self._latest_session_paper_id(session_id)
-        active_paper_file_name = active_turn.get("paper_file_name") if active_turn is not None else self._latest_session_paper_file_name(session_id)
+        active_paper_id = active_turn.get("paper_id") if active_turn is not None else None
+        active_paper_file_name = active_turn.get("paper_file_name") if active_turn is not None else None
         active_topic = active_turn.get("active_topic") if active_turn is not None else None
         last_answer_summary = active_turn.get("last_answer_summary") if active_turn is not None else None
         last_evidence_refs = active_turn.get("evidence_refs") if active_turn is not None else ()
-        if active_paper_id is None:
-            active_paper_id = self._latest_session_paper_id(session_id)
         if active_paper_file_name is None and active_paper_id is not None:
             active_paper_file_name = self._latest_session_paper_file_name(session_id)
 

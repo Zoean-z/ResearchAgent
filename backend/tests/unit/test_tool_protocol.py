@@ -1149,6 +1149,33 @@ def test_heuristic_query_tool_planner_does_not_import_when_tool_is_not_allowed()
     assert decision.tool_name is QueryToolName.SEARCH_SESSION_MEMORY
 
 
+def test_heuristic_query_tool_planner_requires_explicit_discovery_intent_for_arxiv_search() -> None:
+    planner = HeuristicQueryToolPlannerClient()
+
+    decision = planner.choose_next_tool(
+        query="Find a few papers about memory-routed paper agents.",
+        state=QueryToolPlannerState(),
+        allowed_tools=(QueryToolName.SEARCH_ARXIV, QueryToolName.SEARCH_SESSION_MEMORY),
+    )
+
+    assert decision is not None
+    assert decision.tool_name is QueryToolName.SEARCH_ARXIV
+    assert decision.tool_parameters == {"query": "Find a few papers about memory-routed paper agents."}
+
+
+def test_heuristic_query_tool_planner_does_not_use_arxiv_search_for_specific_paper_followup() -> None:
+    planner = HeuristicQueryToolPlannerClient()
+
+    decision = planner.choose_next_tool(
+        query="What does the LongSeeker paper say about context orchestration?",
+        state=QueryToolPlannerState(),
+        allowed_tools=(QueryToolName.SEARCH_ARXIV, QueryToolName.SEARCH_SESSION_MEMORY),
+    )
+
+    assert decision is not None
+    assert decision.tool_name is QueryToolName.SEARCH_SESSION_MEMORY
+
+
 def test_heuristic_query_tool_planner_returns_none_for_disallowed_tools() -> None:
     planner = HeuristicQueryToolPlannerClient()
 

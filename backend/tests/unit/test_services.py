@@ -301,7 +301,6 @@ def test_internal_tool_registry_lists_the_first_batch_of_tools() -> None:
         "register_paper",
         "extract_memories",
         "import_arxiv_paper",
-        "search_arxiv",
         "search_openviking_memory",
         "search_session_memory",
         "search_global_memory",
@@ -316,6 +315,87 @@ def test_internal_tool_registry_lists_the_first_batch_of_tools() -> None:
     }
     assert registry.invoke("search_session_memory", session_id=session.id, query="accuracy", top_k=5).memories
     assert registry.invoke("read_source_passages", session_id=session.id, query="accuracy", related_paper_ids=[paper.id], top_k=3).selected
+
+
+def test_get_conversation_context_does_not_default_active_paper_from_latest_ingest_only() -> None:
+    session_repository = InMemorySessionRepository()
+    message_repository = InMemoryMessageRepository()
+    trace_repository = InMemoryTraceRepository()
+    memory_repository = InMemoryMemoryRepository()
+    chunk_repository = InMemoryChunkRepository()
+    paper_repository = InMemoryPaperRepository()
+    artifact_repository = InMemoryArtifactRepository()
+    session = SessionService(session_repository=session_repository).create_session("Conversation Context")
+    session_repository.save(session)
+    paper = paper_repository.save(
+        Paper(
+            id="paper-ctx-1",
+            canonical_key=build_canonical_key(arxiv_id="2605.05017"),
+            title="Latest Imported Paper",
+        )
+    )
+    artifact_repository.save(
+        Artifact(
+            id="artifact-ctx-1",
+            kind=ArtifactKind.ARXIV_PDF,
+            uri_or_path="https://arxiv.org/pdf/2605.05017.pdf",
+            checksum="ctx-checksum-1",
+        )
+    )
+    session_repository.save_document(
+        SessionDocument(
+            session_id=session.id,
+            paper_id=paper.id,
+            source_type=SourceType.ARXIV,
+            artifact_id="artifact-ctx-1",
+        )
+    )
+    message_repository.save(
+        Message(
+            session_id=session.id,
+            role="user",
+            type=MessageType.INGEST_ARXIV,
+            content="https://arxiv.org/abs/2605.05017",
+        )
+    )
+    message_repository.save(
+        Message(
+            session_id=session.id,
+            role="assistant",
+            type=MessageType.INGEST_ARXIV,
+            content="Imported latest paper summary.",
+            status="completed",
+        )
+    )
+    retrieval_service = RetrievalService(
+        session_repository=session_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+    )
+    registry = InternalToolRegistry(
+        paper_repository=paper_repository,
+        retrieval_service=retrieval_service,
+        context_rerank_service=ContextRerankService(),
+        memory_extraction_service=MemoryExtractionService(
+            session_repository=session_repository,
+            paper_repository=paper_repository,
+            chunk_repository=chunk_repository,
+            memory_repository=memory_repository,
+        ),
+        session_repository=session_repository,
+        message_repository=message_repository,
+        trace_repository=trace_repository,
+        memory_repository=memory_repository,
+        chunk_repository=chunk_repository,
+        artifact_repository=artifact_repository,
+    )
+
+    output = registry.get_conversation_context(session_id=session.id, limit=8)
+
+    assert output.context.recent_message_count == 0
+    assert output.context.recent_turn_count == 0
+    assert output.context.active_paper_id is None
+    assert output.context.active_paper_file_name is None
 
 
 @pytest.mark.parametrize(

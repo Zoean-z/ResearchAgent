@@ -7,11 +7,17 @@ from dataclasses import dataclass
 import re
 from typing import Protocol
 
-from research_agent.tools.protocol import ChunkDescriptor, MemoryDescriptor, QueryToolName
 from research_agent.tools.arxiv_reference import extract_arxiv_id_or_url_from_text
+from research_agent.tools.protocol import ChunkDescriptor, MemoryDescriptor, QueryToolName
 
-_ARXIV_SEARCH_INTENT_PATTERN = re.compile(
-    r"(?:\barxiv\b.*(?:search|find|look\s+for|discover)|(?:search|find|look\s+for).*\barxiv\b|(?:搜索|查找|找|检索).*(?:arxiv|论文|papers?)|(?:arxiv|论文|papers?).*(?:搜索|查找|找|检索))",
+_ARXIV_DISCOVERY_VERB_PATTERN = re.compile(
+    r"(?:\bsearch\b|\bfind\b|look\s+for|\bdiscover\b|\brecommend\b|\bsuggest\b|show\s+me|"
+    r"\u641c\u7d22|\u67e5\u627e|\u68c0\u7d22|\u63a8\u8350|\u627e\u4e00\u4e9b|\u627e\u51e0\u7bc7)",
+    re.IGNORECASE,
+)
+_ARXIV_DISCOVERY_TARGET_PATTERN = re.compile(
+    r"(?:\barxiv\b|\bpaper\b|\bpapers\b|\bliterature\b|\bwork\b|\bworks\b|"
+    r"\u8bba\u6587|\u6587\u732e|\u5de5\u4f5c)",
     re.IGNORECASE,
 )
 
@@ -96,7 +102,7 @@ class HeuristicQueryToolPlannerClient:
                     fallback_used=False,
                 )
 
-        if QueryToolName.SEARCH_ARXIV in allowed and _ARXIV_SEARCH_INTENT_PATTERN.search(query):
+        if QueryToolName.SEARCH_ARXIV in allowed and _is_explicit_arxiv_discovery_query(query):
             return QueryToolPlannerDecision(
                 tool_name=QueryToolName.SEARCH_ARXIV,
                 rationale=self._rationale_for(tool_name=QueryToolName.SEARCH_ARXIV, state=state, query=query),
@@ -171,6 +177,21 @@ class HeuristicQueryToolPlannerClient:
                 return "selected_memory_is_sufficient_compose_without_source_reread"
             return "no_supporting_memory_selected_compose_with_explicit_fallback_context"
         return f"heuristic_planner_selected_{tool_name.value}"
+
+
+def _is_explicit_arxiv_discovery_query(query: str) -> bool:
+    """Return True only for explicit paper-discovery requests."""
+
+    normalized_query = query.strip()
+    if not normalized_query:
+        return False
+    if extract_arxiv_id_or_url_from_text(normalized_query) is not None:
+        return False
+    return bool(
+        _ARXIV_DISCOVERY_VERB_PATTERN.search(normalized_query)
+        and _ARXIV_DISCOVERY_TARGET_PATTERN.search(normalized_query)
+    )
+
 
 __all__ = [
     "HOST_CONTROLLED_QUERY_TOOLS",

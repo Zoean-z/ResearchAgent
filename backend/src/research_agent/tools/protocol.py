@@ -682,7 +682,7 @@ Callers must check for ToolError before interpreting result.
 QUERY_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name=QueryToolName.SEARCH_ARXIV,
-        description="Search arXiv for papers matching a research query. Returns lightweight metadata including title, authors, abstract, arXiv id, abs URL, and PDF URL. Use this to discover candidate papers. This tool does not import, download, or parse papers. To add a selected paper to the current research session, call import_arxiv_paper with its arxiv_id or URL.",
+        description="Search arXiv for papers matching a research query. Returns lightweight metadata including title, authors, abstract, arXiv id, abs URL, and PDF URL. Use this only when the user explicitly wants to discover, search for, or recommend papers that are not already imported in the current session. Do not use it for follow-up questions about papers already in the session. This tool does not import, download, or parse papers. To add a selected paper to the current research session, call import_arxiv_paper with its arxiv_id or URL.",
         input_model=SearchArxivInput,
         output_model=SearchArxivOutput,
     ),
